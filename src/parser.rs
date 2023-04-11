@@ -188,7 +188,7 @@ impl Parser {
                 loop {
                     self.trim();
                     match self.try_eat("}") {
-                        Some(r) => {
+                        Some(_) => {
                             break;
                         }
                         None => {
@@ -239,12 +239,14 @@ impl Parser {
         if components.len() == 1 {
             return match components.pop().unwrap() {
                 (_, TypeComponent::Named(c)) => Ok(Type::Named(c)),
+                (_, TypeComponent::Int) => Ok(Type::Int),
                 (loc, TypeComponent::Arrow) => Err(Error::ExpectedNamedType(loc))
             }
         }
 
         let ty = match components.pop().unwrap() {
             (_, TypeComponent::Named(c)) => Type::Named(c),
+            (_, TypeComponent::Int) => Type::Int,
             (loc, TypeComponent::Arrow) => { return Err(Error::ExpectedNamedType(loc)) }
         };
 
@@ -255,7 +257,7 @@ impl Parser {
                         let rest = self.make_type_from_components(components)?;
                         Ok(Type::Func(Box::new(ty), Box::new(rest)))
                     }
-                    TypeComponent::Named(n) => {
+                    TypeComponent::Named(_) | TypeComponent::Int => {
                         unimplemented!()
                     }
                 }
@@ -273,6 +275,7 @@ impl Parser {
                 let name = self.parse_upper_ident();
                 match name {
                     Err(_) => None,
+                    Ok(s) if s == "Int" => Some((loc, TypeComponent::Int)),
                     Ok(n) => Some((loc, TypeComponent::Named(n)))
                 }
             }
@@ -302,7 +305,7 @@ impl Parser {
         let mut exprs: VecDeque<(Loc, Expr)> = VecDeque::new();
         loop {
             let loc = self.loc;
-            match dbg!(self.parse_expr_nested()) {
+            match self.parse_expr_nested() {
                 Err(_) => {
                     // We've found a non-expression, so stop parsing.
                     // Check if it's an arrow.
@@ -480,7 +483,8 @@ fn operator_char(c: char) -> bool {
 #[derive(Debug)]
 enum TypeComponent {
     Arrow,
-    Named(String)
+    Named(String),
+    Int,
 }
 
 #[derive(Debug)]

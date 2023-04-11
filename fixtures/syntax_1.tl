@@ -2,7 +2,7 @@ type Bool { True, False }
 
 f : Int -> Int -> Int { x y -> + x y }
 
-gn : Int -> Int -> Int { x y -> - (*  x y) x }
+g : Int -> Int -> Int { x y -> - (*  x y) x }
 
 main : Int {
   g 4 53434
