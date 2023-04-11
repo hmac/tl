@@ -1,5 +1,5 @@
-use std::io::stdin;
 use std::io::read_to_string;
+use std::io::stdin;
 
 use tl::{ast, parser, typechecker};
 
@@ -12,10 +12,18 @@ fn main() {
 
             for decl in &ast {
                 match decl {
-                    ast::Decl::Type { name, constructors, loc } => {
-                        typechecker.register_type(&name, &constructors, *loc).unwrap();
+                    ast::Decl::Type {
+                        name,
+                        constructors,
+                        loc,
+                    } => {
+                        typechecker
+                            .register_type(&name, &constructors, *loc)
+                            .unwrap();
                     }
-                    ast::Decl::Func { name, r#type, loc, .. } => {
+                    ast::Decl::Func {
+                        name, r#type, loc, ..
+                    } => {
                         typechecker.register_func(&name, &r#type, *loc).unwrap();
                     }
                 }
@@ -25,7 +33,7 @@ fn main() {
 
             for decl in ast {
                 match decl {
-                    ast::Decl::Func {  r#type, body, .. } => {
+                    ast::Decl::Func { r#type, body, .. } => {
                         if let Err(error) = typechecker.check_func(&body, &r#type) {
                             println!("Error:\n");
                             ast::print_error(&parser.into_input(), error);
@@ -37,7 +45,7 @@ fn main() {
             }
 
             println!("Typecheck successful.");
-        },
+        }
         Err(error) => {
             println!("Error:\n");
             ast::print_error(&parser.into_input(), error);
