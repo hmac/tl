@@ -39,20 +39,21 @@ fn string_index_to_line_col_number(string_index: usize, newline_indices: &[usize
 //
 pub fn print_error<E: std::fmt::Display + HasLoc>(orig: &str, error: E) {
     let loc = error.loc();
-    let (line, col) = string_index_to_line_col_number(loc, &calculate_lines(orig));
+    let newlines = calculate_lines(orig);
+    let (line, col) = string_index_to_line_col_number(loc, &newlines);
     let mut source_lines = orig.split('\n');
     // Print the previous line, if it exists
     match source_lines.nth(line - 2) {
         Some(l) => {
-            println!("{}: {}", line - 1, l);
-            println!("{}: {}", line, source_lines.next().unwrap());
+            println!("{:>4}: {}", line - 1, l);
+            println!("{:>4}: {}", line, source_lines.next().unwrap());
         }
         None => {
-            println!("{}: {}", line, source_lines.nth(line - 1).unwrap());
+            println!("{:>4}: {}", line, source_lines.nth(line - 1).unwrap());
         }
     }
-    println!("{}^", " ".repeat(col));
-    println!("{} {}", " ".repeat(col), error.to_string());
+    println!("      {}^", " ".repeat(col));
+    println!("      {} {}", " ".repeat(col), error.to_string());
 
 }
 
@@ -141,7 +142,7 @@ impl HasLoc for Expr {
 
 #[derive(Debug)]
 pub struct MatchBranch {
-    loc: Loc,
+    pub loc: Loc,
     pub constructor: String,
     pub args: Vec<Pattern>,
     pub rhs: Expr

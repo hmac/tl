@@ -28,13 +28,14 @@ main : Int {
 //  }
 //}
 //
-//not : Bool -> Bool {
-//  b -> match b {
-//    True -> False,
-//    False -> True
-//  }
-//}
-//  
-//not_empty : List a -> Bool {
-//  list -> not (empty list)
-//}
+
+not : Bool -> Bool {
+  b -> match b {
+    True -> False,
+    False -> True
+  }
+}
+  
+// not_empty : List a -> Bool {
+//   list -> not (empty list)
+// }

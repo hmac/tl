@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Decl, TypeConstructor, Var, Pattern, Operator, Loc, HasLoc, SourceType};
+use crate::ast::{Expr, Decl, TypeConstructor, Var, Pattern, Operator, Loc, HasLoc, SourceType, MatchBranch};
 use std::collections::VecDeque;
 
 #[derive(Debug)]
@@ -282,8 +282,12 @@ impl Parser {
                     match exprs.pop_front() {
                         None => { return Err(Error::ExpectedExpr(self.loc)); }
                         Some(f) => {
-                            let args = exprs.into_iter().collect();
-                            return Ok(Expr::App{loc: f.loc(), head: Box::new(f), args});
+                            let args: Vec<_> = exprs.into_iter().collect();
+                            if args.is_empty() {
+                                return Ok(f);
+                            } else {
+                                return Ok(Expr::App{loc: f.loc(), head: Box::new(f), args});
+                            }
                         }
                     }
 
@@ -311,6 +315,7 @@ impl Parser {
             self.trim();
             return Ok(e);
         }
+        // TODO: merge with parse_var
         if self.input().starts_with(lower_ident_char) {
             let loc = self.loc;
             let n = self.parse_lower_ident()?;
@@ -324,14 +329,74 @@ impl Parser {
         if self.input().starts_with(operator_char) {
             // To ensure we don't parse x -> y as x - <parse error>
             if !self.input().starts_with("->") {
-                return self.parse_operator();
+                let (loc, op) = self.parse_operator()?;
+                return Ok(Expr::Var(loc, op));
+            }
+        }
+        Err(Error::ExpectedExpr(self.loc))
+    }
+
+    fn parse_var(&mut self) -> Result<Var, Error> {
+        if self.input().starts_with(lower_ident_char) {
+            let n = self.parse_lower_ident()?;
+            return Ok(Var::Local(n));
+        }
+        if self.input().starts_with(upper_ident_char) {
+            let n = self.parse_upper_ident()?;
+            return Ok(Var::Constructor(n));
+        }
+        if self.input().starts_with(operator_char) {
+            // To ensure we don't parse x -> y as x - <parse error>
+            if !self.input().starts_with("->") {
+                let (_, op) = self.parse_operator()?;
+                return Ok(op);
             }
         }
         Err(Error::ExpectedExpr(self.loc))
     }
 
     fn parse_match(&mut self) -> Result<Expr, Error> {
-        unimplemented!()
+        let loc = self.loc;
+        self.eat("match")?;
+        self.trim();
+        let target = self.parse_var()?;
+        self.trim();
+        self.eat("{")?;
+        self.trim();
+        let mut branches = vec![];
+        loop {
+            if self.input().starts_with("}") {
+                break;
+            }
+            let branch = self.parse_match_branch()?;
+            self.trim();
+            self.try_eat(",");
+            branches.push(branch);
+            self.trim();
+        }
+        self.eat("}")?;
+        self.trim();
+        Ok(Expr::Match { loc, target, branches })
+    }
+
+    fn parse_match_branch(&mut self) -> Result<MatchBranch, Error> {
+        let loc = self.loc;
+        let constructor = self.parse_upper_ident()?;
+        self.trim();
+        let mut args = vec![];
+        loop {
+            if self.input().starts_with("->") {
+                break;
+            }
+            let loc = self.loc;
+            let pat = self.parse_lower_ident()?;
+            args.push(Pattern::Var(loc, pat));
+            self.trim();
+        }
+        self.eat("->")?;
+        self.trim();
+        let rhs = self.parse_expr()?;
+        Ok(MatchBranch { loc, constructor, args, rhs })
     }
 
     fn parse_int(&mut self) -> Result<Expr, Error> {
@@ -351,7 +416,7 @@ impl Parser {
         }
     }
 
-    fn parse_operator(&mut self) -> Result<Expr, Error> {
+    fn parse_operator(&mut self) -> Result<(Loc, Var), Error> {
         let op = self.eat_char()?;
         let op = match op {
             '+' => Operator::Add,
@@ -359,7 +424,7 @@ impl Parser {
             '*' => Operator::Mul,
             _ => { return Err(Error::ExpectedOperator(self.loc - 1)); }
         };
-        Ok(Expr::Var(self.loc - 1, Var::Operator(op)))
+        Ok((self.loc - 1, Var::Operator(op)))
     }
 
     fn parse_type_constructor(&mut self) -> Result<TypeConstructor, Error> {

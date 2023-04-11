@@ -233,8 +233,8 @@ impl Typechecker {
     }
 
     fn check_match_expr(&self, local_variables: &LocalVariables, branches: &Vec<MatchBranch>, target_type: &Type, result_type: &Type) -> Result<(), Error> {
-        // For each subsequent branch...
-        for branch in branches[1..].iter() {
+        // For each branch...
+        for branch in branches {
             // Check the constructor yields `target_type`
             let ctor_ty = match self.constructors.get(&branch.constructor) {
                 None => { return Err(Error::UnknownConstructor(branch.loc(), branch.constructor.clone())); }
@@ -246,7 +246,7 @@ impl Typechecker {
 
             // Check the constructor has the right number of args
             let ctor_ty_args = ctor_ty.func_args();
-            let num_args_in_ctor_type = ctor_ty_args.len();
+            let num_args_in_ctor_type = ctor_ty_args.len() - 1; // last elem is the result type
             if num_args_in_ctor_type != branch.args.len() {
                 return Err(Error::MatchBranchArgNumberMismatch {
                     loc: branch.loc(),
