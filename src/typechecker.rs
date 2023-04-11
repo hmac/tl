@@ -17,6 +17,48 @@ pub enum Error {
     ExpectedFunctionType { loc: Loc, actual_type: Type },
 }
 
+impl HasLoc for Error {
+    fn loc(&self) -> Loc {
+        match self {
+            Error::TypeAlreadyDefined(loc, _) => *loc,
+            Error::UnknownType(loc, _) => *loc,
+            Error::UnknownVariable(loc, _) => *loc,
+            Error::UnknownConstructor(loc, _) => *loc,
+            Error::EmptyMatch(loc) => *loc,
+            Error::ExpectedType { loc, .. } => *loc,
+            Error::MatchBranchArgNumberMismatch { loc, ..} => *loc,
+            Error::CannotInferTypeOfFunctions(loc) => *loc,
+            Error::ExpectedFunctionType { loc, ..} => *loc,
+        }
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Error::TypeAlreadyDefined(_, ty) => {write!(f, "the type '{ty}' has already been defined elsewhere") },
+            Error::UnknownType(_, ty) => {write!(f, "unknown type '{ty}'") },
+            Error::UnknownVariable(_, v) => {write!(f, "unknown variable '{v}'") },
+            Error::UnknownConstructor(_, c) => {write!(f, "unknown constructor '{c}'") },
+            Error::EmptyMatch(_) => {write!(f, "match expressions cannot be empty") },
+            Error::ExpectedType { expected, actual, .. } => {
+                write!(f, "expected this to have the type {expected:?}, but it actually has the type {actual:?}")
+            }
+            Error::MatchBranchArgNumberMismatch { number_of_args_in_branch, number_of_args_in_constructor_type, .. } => {
+                write!(
+                    f,
+                    "the number of arguments in this match branch ({}) doesn't match the number of arguments in the constructor's type ({})",
+                    number_of_args_in_branch,
+                    number_of_args_in_constructor_type
+                    )
+            },
+            Error::CannotInferTypeOfFunctions(_) => {write!(f, "this function needs a type annotation")},
+            Error::ExpectedFunctionType { actual_type, ..} => {write!(f, "expected to have a function type, but its actual type is {actual_type:?}")},
+        }
+    }
+}
+
+
 pub struct Typechecker {
     constructors: HashMap<String, (Loc, Type)>,
     types: HashSet<String>,

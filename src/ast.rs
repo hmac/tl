@@ -2,6 +2,60 @@ use std::collections::VecDeque;
 
 pub type Loc = usize;
 
+fn calculate_lines(s: &str) -> Vec<usize> {
+    s.match_indices('\n').map(|(n,_)| n).collect()
+}
+
+fn string_index_to_line_col_number(string_index: usize, newline_indices: &[usize]) -> (usize, usize) {
+    // the (zero-indexed) line
+    // we look for the first consecutive pair of newline indices (i, j)
+    // where i <= string_index <= j
+    // if no such pair exists, the location must be on the first line
+    let line = {
+        newline_indices.windows(2).position(|i_j| {
+            let i = i_j[0];
+            let j = i_j[1];
+            i <= string_index && string_index <= j
+        }).unwrap_or(0)
+        // let i = newline_indices.iter().rev().position(|l| *l < string_index).unwrap_or(0);
+        // newline_indices.len() - i - 1
+    };
+    // the string index of the newline preceding this line (or 0 if it's the first line)
+    let line_index = newline_indices.get(line).unwrap_or(&0);
+    // the column position in the line
+    let col = string_index - line_index;
+    (line + 2, col + 1)
+}
+
+// Print the line before the error location,
+// then the line with the error.
+// Then print a caret (^) indicating the error
+// e.g.
+//
+// f : A -> A {
+//   x => x
+//     ^
+// expected '-'
+//
+pub fn print_error<E: std::fmt::Display + HasLoc>(orig: &str, error: E) {
+    let loc = error.loc();
+    let (line, col) = string_index_to_line_col_number(loc, &calculate_lines(orig));
+    let mut source_lines = orig.split('\n');
+    // Print the previous line, if it exists
+    match source_lines.nth(line - 2) {
+        Some(l) => {
+            println!("{}: {}", line - 1, l);
+            println!("{}: {}", line, source_lines.next().unwrap());
+        }
+        None => {
+            println!("{}: {}", line, source_lines.nth(line - 1).unwrap());
+        }
+    }
+    println!("{}^", " ".repeat(col));
+    println!("{} {}", " ".repeat(col), error.to_string());
+
+}
+
 /// A trait for types that have a source location.
 pub trait HasLoc {
     fn loc(&self) -> Loc;

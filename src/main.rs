@@ -26,7 +26,11 @@ fn main() {
             for decl in ast {
                 match decl {
                     ast::Decl::Func {  r#type, body, .. } => {
-                        typechecker.check_func(&body, &r#type).unwrap();
+                        if let Err(error) = typechecker.check_func(&body, &r#type) {
+                            println!("Error:\n");
+                            ast::print_error(&parser.into_input(), error);
+                            return;
+                        }
                     }
                     _ => {}
                 }
@@ -36,7 +40,7 @@ fn main() {
         },
         Err(error) => {
             println!("Error:\n");
-            parser::print_error(&parser.into_input(), error);
+            ast::print_error(&parser.into_input(), error);
         }
     }
 }
