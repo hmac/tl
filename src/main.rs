@@ -12,7 +12,7 @@ fn main() {
             dbg!(ast);
         },
         Err(error) => {
-            println!("Error:");
+            println!("Error:\n");
             parser::print_error(&parser.into_input(), error);
         }
     }

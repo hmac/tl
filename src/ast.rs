@@ -39,4 +39,12 @@ pub enum Pattern {
 pub enum Var {
     Local(String),
     Constructor(String),
+    Operator(Operator)
+}
+
+#[derive(Debug)]
+pub enum Operator {
+    Add,
+    Sub,
+    Mul
 }

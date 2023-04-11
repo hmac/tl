@@ -1,4 +1,5 @@
-use crate::ast::{Expr, Type, Decl, TypeConstructor, Var, Pattern};
+use crate::ast::{Expr, Type, Decl, TypeConstructor, Var, Pattern, Operator};
+use std::collections::VecDeque;
 
 type Loc = usize;
 
@@ -9,7 +10,10 @@ pub enum Error {
     ExpectedNamedType(Loc),
     ExpectedPattern(Loc),
     ExpectedExpr(Loc),
-    ExpectedStr(&'static str, Loc)
+    ExpectedStr(&'static str, Loc),
+    ExpectedOperator(Loc),
+    ExpectedInteger(Loc),
+    UnexpectedEof(Loc),
 }
 
 impl Error {
@@ -20,7 +24,10 @@ impl Error {
             Error::ExpectedNamedType(loc) => *loc,
             Error::ExpectedExpr(loc) => *loc,
             Error::ExpectedPattern(loc) => *loc,
-            Error::ExpectedStr(_, loc) => *loc
+            Error::ExpectedStr(_, loc) => *loc,
+            Error::ExpectedOperator(loc) => *loc,
+            Error::ExpectedInteger(loc) => *loc,
+            Error::UnexpectedEof(loc) => *loc,
         }
     }
 }
@@ -34,8 +41,36 @@ impl std::fmt::Display for Error {
             Error::ExpectedExpr(_) => {write!(f, "expected an expression") },
             Error::ExpectedPattern(_) => {write!(f, "expected a pattern") },
             Error::ExpectedStr(s, _) => {write!(f, "expected '{}'", s)},
+            Error::ExpectedOperator(_) => {write!(f, "expected '+' or '-' or '*'")},
+            Error::ExpectedInteger(_) => {write!(f, "expected an integer")},
+            Error::UnexpectedEof(_) => {write!(f, "unexpected EOF")},
         }
     }
+}
+
+fn calculate_lines(s: &str) -> Vec<usize> {
+    s.match_indices('\n').map(|(n,_)| n).collect()
+}
+
+fn string_index_to_line_col_number(string_index: usize, newline_indices: &[usize]) -> (usize, usize) {
+    // the (zero-indexed) line
+    // we look for the first consecutive pair of newline indices (i, j)
+    // where i <= string_index <= j
+    // if no such pair exists, the location must be on the first line
+    let line = {
+        newline_indices.windows(2).position(|i_j| {
+            let i = i_j[0];
+            let j = i_j[1];
+            i <= string_index && string_index <= j
+        }).unwrap_or(0)
+        // let i = newline_indices.iter().rev().position(|l| *l < string_index).unwrap_or(0);
+        // newline_indices.len() - i - 1
+    };
+    // the string index of the newline preceding this line (or 0 if it's the first line)
+    let line_index = newline_indices.get(line).unwrap_or(&0);
+    // the column position in the line
+    let col = string_index - line_index;
+    (line + 2, col + 1)
 }
 
 // Print the line before the error location,
@@ -50,73 +85,21 @@ impl std::fmt::Display for Error {
 //
 pub fn print_error(orig: &str, error: Error) {
     let loc = error.loc();
-    // Find the nearest newline before the error loc, if one exists
-    let (str_before_err, str_after_err) = orig.split_at(loc);
-    match str_before_err.rfind('\n') {
-        Some(newline1) => {
-            // there is at least one newline before error.
-            // now we try to find another.
-            let str_before_newline = &str_before_err[0..newline1];
-            match str_before_newline.rfind('\n') {
-                Some(newline2) => {
-                    // Now find the newline after the error.
-                    match str_after_err.find('\n') {
-                        Some(mut newline3) => {
-                            newline3 += str_before_err.len();
-                            // Print both lines, then the error.
-                            println!("{}", &orig[newline2..newline1]);
-                            println!("{}", &orig[newline1..newline3]);
-                            let caret_line = " ".repeat(loc-newline1);
-                            println!("{caret_line}^");
-                            println!();
-                            println!("{}", error.to_string());
-                        },
-                        None => {
-                            // Print both lines, then the error.
-                            println!("{}", &orig[newline2..newline1]);
-                            println!("{}", &orig[newline1..]);
-                            let caret_line = " ".repeat(loc-newline1);
-                            println!("{caret_line}^");
-                            println!();
-                            println!("{}", error.to_string());
-                        }
-                    }
-                },
-                None => {
-                    // Now find the newline after the error.
-                    match str_after_err.find('\n') {
-                        Some(mut newline3) => {
-                            newline3 += str_before_err.len();
-                            // Print the line, then the error.
-                            println!("{}", &orig[newline1..newline3]);
-                            let caret_line = " ".repeat(loc-newline1);
-                            println!("{caret_line}^");
-                            println!();
-                            println!("{}", error.to_string());
-                        },
-                        None => {
-                            // Print the line, then the error.
-                            println!("{}", &orig[newline1..]);
-                            let caret_line = " ".repeat(loc-newline1);
-                            println!("{caret_line}^");
-                            println!();
-                            println!("{}", error.to_string());
-                        }
-                    }
-                }
-            }
+    let (line, col) = string_index_to_line_col_number(loc, &calculate_lines(orig));
+    let mut source_lines = orig.split('\n');
+    // Print the previous line, if it exists
+    match source_lines.nth(line - 2) {
+        Some(l) => {
+            println!("{}: {}", line - 1, l);
+            println!("{}: {}", line, source_lines.next().unwrap());
         }
         None => {
-            // there is no newline before the error.
-            // just print the error line
-            let line = orig.split('\n').next().unwrap_or_else(|| orig);
-            println!("{}", line);
-            let caret_line = " ".repeat(loc);
-            println!("{caret_line}^");
-            println!();
-            println!("{}", error.to_string());
+            println!("{}: {}", line, source_lines.nth(line - 1).unwrap());
         }
     }
+    println!("{}^", " ".repeat(col));
+    println!("{} {}", " ".repeat(col), error.to_string());
+
 }
 
 pub struct Parser {
@@ -153,11 +136,34 @@ impl Parser {
         }
     }
 
+    fn eat_char(&mut self) -> Result<char, Error> {
+        match self.input().chars().next() {
+            Some(c) => {
+                self.loc += 1;
+                Ok(c)
+            }, 
+            None => Err(Error::UnexpectedEof(self.loc))
+        }
+    }
+
     fn trim(&mut self) {
         let mut len = 0;
         while self.input()[len..].starts_with(whitespace_char) {
             len += 1;
         }
+
+        // Skip line comments
+        loop {
+            if self.input()[len..].starts_with("//") {
+                while !self.input()[len..].starts_with('\n') {
+                    len += 1;
+                }
+                len += 1;
+            } else {
+                break;
+            }
+        }
+
         self.loc += len;
     }
 
@@ -293,10 +299,10 @@ impl Parser {
         // function body.
         //
         // Otherwise, assume we're looking at a function application.
-        let mut exprs: Vec<(Loc, Expr)> = vec![];
+        let mut exprs: VecDeque<(Loc, Expr)> = VecDeque::new();
         loop {
             let loc = self.loc;
-            match self.parse_expr_nested() {
+            match dbg!(self.parse_expr_nested()) {
                 Err(_) => {
                     // We've found a non-expression, so stop parsing.
                     // Check if it's an arrow.
@@ -325,16 +331,18 @@ impl Parser {
 
                     // It's not an arrow, so the preceding expressions form an application
                     // Construct the application
-                    match exprs.pop() {
+                    match exprs.pop_front() {
                         None => { return Err(Error::ExpectedExpr(self.loc)); }
                         Some((_, f)) => {
                             let args = exprs.into_iter().map(|(_, e)| e).collect();
                             return Ok(Expr::App{head: Box::new(f), args});
                         }
                     }
+
                 },
                 Ok(expr) => {
-                    exprs.push((loc, expr));
+                    exprs.push_back((loc, expr));
+                    self.trim();
                 }
             }
         }
@@ -349,8 +357,11 @@ impl Parser {
             return self.parse_match();
         }
         if self.input().starts_with("(") {
+            self.eat("(")?;
+            let e = self.parse_expr()?;
             self.eat(")")?;
-            return self.parse_expr();
+            self.trim();
+            return Ok(e);
         }
         if self.input().starts_with(lower_ident_char) {
             let n = self.parse_lower_ident()?;
@@ -360,6 +371,12 @@ impl Parser {
             let n = self.parse_upper_ident()?;
             return Ok(Expr::Var(Var::Constructor(n)));
         }
+        if self.input().starts_with(operator_char) {
+            // To ensure we don't parse x -> y as x - <parse error>
+            if !self.input().starts_with("->") {
+                return self.parse_operator();
+            }
+        }
         Err(Error::ExpectedExpr(self.loc))
     }
 
@@ -368,7 +385,30 @@ impl Parser {
     }
 
     fn parse_int(&mut self) -> Result<Expr, Error> {
-        unimplemented!()
+        let mut len = 0;
+        while self.input()[len..].starts_with(char::is_numeric) {
+            len += 1;
+        }
+
+        let (s, _) = self.input().split_at(len);
+        match s.parse() {
+            Ok(n) => {
+                self.loc += len;
+                Ok(Expr::Int(n))
+            },
+            Err(_) => Err(Error::ExpectedInteger(self.loc)),
+        }
+    }
+
+    fn parse_operator(&mut self) -> Result<Expr, Error> {
+        let op = self.eat_char()?;
+        let op = match op {
+            '+' => Operator::Add,
+            '-' => Operator::Sub,
+            '*' => Operator::Mul,
+            _ => { return Err(Error::ExpectedOperator(self.loc - 1)); }
+        };
+        Ok(Expr::Var(Var::Operator(op)))
     }
 
     fn parse_type_constructor(&mut self) -> Result<TypeConstructor, Error> {
@@ -394,16 +434,20 @@ impl Parser {
     }
 
     fn parse_lower_ident(&mut self) -> Result<String, Error> {
-        match self.input().match_indices(lower_ident_char).next() {
-            Some((0, m)) => {
-                let m = m.to_string();
-                self.loc += m.len();
-                Ok(m)
-            },
-            _ => {
-                Err(Error::ExpectedLowerIdent(self.loc))
-            }
+        if !self.input().starts_with(lower_ident_char) {
+            return Err(Error::ExpectedLowerIdent(self.loc))
         }
+
+        let mut len = 1;
+
+        while self.input()[len..].starts_with(alpha_or_underscore_char) {
+            len += 1;
+        }
+
+        let (m, _) = self.input().split_at(len);
+        let m = m.to_string();
+        self.loc += len;
+        Ok(m)
     }
 
 }
@@ -426,6 +470,10 @@ fn whitespace_char(c: char) -> bool {
 
 fn numeric_char(c: char) -> bool {
     c >= '0' && c <= '9'
+}
+
+fn operator_char(c: char) -> bool {
+    c == '+' || c == '-'  || c == '*'
 }
 
 

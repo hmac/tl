@@ -2,35 +2,39 @@ type Bool { True, False }
 
 f : Int -> Int -> Int { x y -> + x y }
 
-g : Int -> Int -> Int { x y -> - (*  x y) x }
+gn : Int -> Int -> Int { x y -> - (*  x y) x }
 
-apply : (a -> b) -> a -> b {
-  f x -> f x
-}
-
-apply2 : (a -> a) -> a -> a {
-  f x -> f (f x)
+main : Int {
+  g 4 53434
 }
 
-type List a {
-  Nil,
-  Cons a (List a)
-}
-
-empty : List a -> Bool {
-  list -> match list {
-    Nil -> True,
-    Cons x xs -> False
-  }
-}
-
-not : Bool -> Bool {
-  b -> match b {
-    True -> False,
-    False -> True
-  }
-}
-  
-not_empty : List a -> Bool {
-  list -> not (empty list)
-}
+//apply : (a -> b) -> a -> b {
+//  f x -> f x
+//}
+//
+//apply2 : (a -> a) -> a -> a {
+//  f x -> f (f x)
+//}
+//
+//type List a {
+//  Nil,
+//  Cons a (List a)
+//}
+//
+//empty : List a -> Bool {
+//  list -> match list {
+//    Nil -> True,
+//    Cons x xs -> False
+//  }
+//}
+//
+//not : Bool -> Bool {
+//  b -> match b {
+//    True -> False,
+//    False -> True
+//  }
+//}
+//  
+//not_empty : List a -> Bool {
+//  list -> not (empty list)
+//}
