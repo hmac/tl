@@ -12,8 +12,8 @@ fn main() {
 
             for decl in &ast {
                 match decl {
-                    ast::Decl::Type { name, constructors, .. } => {
-                        typechecker.register_type(&name, &constructors).unwrap();
+                    ast::Decl::Type { name, constructors, loc } => {
+                        typechecker.register_type(&name, &constructors, *loc).unwrap();
                     }
                     ast::Decl::Func { name, r#type, loc, .. } => {
                         typechecker.register_func(&name, &r#type, *loc).unwrap();

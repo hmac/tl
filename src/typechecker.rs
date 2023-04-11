@@ -6,19 +6,19 @@ const TYPE_INT: Type = Type::Int;
 
 #[derive(Debug)]
 pub enum Error {
-    TypeAlreadyDefined(String),
-    UnknownType(String),
-    UnknownVariable(String),
-    UnknownConstructor(String),
-    EmptyMatch,
-    ExpectedType{ expected: Type, actual: Type },
-    MatchBranchArgNumberMismatch { number_of_args_in_branch: usize, number_of_args_in_constructor_type: usize },
-    CannotInferTypeOfFunctions,
-    ExpectedFunctionType { actual_type: Type },
+    TypeAlreadyDefined(Loc, String),
+    UnknownType(Loc, String),
+    UnknownVariable(Loc, String),
+    UnknownConstructor(Loc, String),
+    EmptyMatch(Loc),
+    ExpectedType { loc: Loc, expected: Type, actual: Type },
+    MatchBranchArgNumberMismatch { loc: Loc, number_of_args_in_branch: usize, number_of_args_in_constructor_type: usize },
+    CannotInferTypeOfFunctions(Loc),
+    ExpectedFunctionType { loc: Loc, actual_type: Type },
 }
 
 pub struct Typechecker {
-    constructors: HashMap<String, Type>,
+    constructors: HashMap<String, (Loc, Type)>,
     types: HashSet<String>,
     functions: HashMap<String, (Loc, Type)>,
 
@@ -33,10 +33,10 @@ impl Typechecker {
         }
     }
 
-    pub fn register_type(&mut self, name: &str, constructors: &[TypeConstructor]) -> Result<(), Error> {
+    pub fn register_type(&mut self, name: &str, constructors: &[TypeConstructor], loc: Loc) -> Result<(), Error> {
         // Check that type name is not already in use
         if self.types.contains(name) {
-            return Err(Error::TypeAlreadyDefined(name.to_string()))
+            return Err(Error::TypeAlreadyDefined(loc, name.to_string()))
         }
 
         // Check that constructors are well-formed
@@ -45,7 +45,7 @@ impl Typechecker {
             let ctor_type = make_constructor_type(&name, &ctor);
             // Note: we don't check the type now.
             // That happens later, see `check_all_types`.
-            self.constructors.insert(ctor.name.to_string(), ctor_type);
+            self.constructors.insert(ctor.name.to_string(), (ctor.loc(), ctor_type));
         }
         Ok(())
     }
@@ -65,18 +65,18 @@ impl Typechecker {
 
     fn check_expr(&self, local_variables: &LocalVariables, expr: &Expr, expected_type: &Type) -> Result<(), Error> {
         match expr {
-            Expr::Int(_,_) => self.assert_type_eq(expected_type, &TYPE_INT),
-            Expr::Var(_, v) => {
-                let ty = self.infer_var(local_variables, v)?;
-                self.assert_type_eq(expected_type, &ty)
+            Expr::Int(loc, _) => self.assert_type_eq(expected_type, &TYPE_INT, *loc),
+            Expr::Var(loc, v) => {
+                let ty = self.infer_var(local_variables, v, *loc)?;
+                self.assert_type_eq(expected_type, &ty, *loc)
             }
-            Expr::Match { target, branches, .. } => {
+            Expr::Match { target, branches, loc, .. } => {
                 // Infer the type of the target
-                let target_type = self.infer_var(local_variables, target)?;
+                let target_type = self.infer_var(local_variables, target, *loc)?;
 
                 // There must be at least one branch
                 if branches.is_empty() {
-                    return Err(Error::EmptyMatch)
+                    return Err(Error::EmptyMatch(*loc))
                 }
 
                 self.check_match_expr(local_variables, branches, &target_type, &expected_type)?;
@@ -108,7 +108,7 @@ impl Typechecker {
 
                 self.check_expr(&LocalVariables::extend(&local_variables, new_locals), body, &result_type)
             }
-            Expr::App { head, args, .. } => {
+            Expr::App { head, args, loc, .. } => {
                 // Infer type of head
                 let head_type = self.infer_expr(local_variables, head)?;
 
@@ -128,7 +128,7 @@ impl Typechecker {
 
                 // Reconstruct result type
                 let result_type = Type::from_func_args(&head_type_args.collect());
-                self.assert_type_eq(expected_type, &result_type)?;
+                self.assert_type_eq(expected_type, &result_type, *loc)?;
                 Ok(())
             }
         }
@@ -137,14 +137,14 @@ impl Typechecker {
     fn infer_expr(&self, local_variables: &LocalVariables, expr: &Expr) -> Result<Type, Error> {
         match expr {
             Expr::Int(_, _) => Ok(TYPE_INT),
-            Expr::Var(_, v) => self.infer_var(local_variables, v),
-            Expr::Match { target, branches, .. } => {
+            Expr::Var(loc, v) => self.infer_var(local_variables, v, *loc),
+            Expr::Match { target, branches, loc, .. } => {
                 // Infer the type of the target
-                let target_type = self.infer_var(local_variables, target)?;
+                let target_type = self.infer_var(local_variables, target, *loc)?;
 
                 // There must be at least one branch
                 if branches.is_empty() {
-                    return Err(Error::EmptyMatch)
+                    return Err(Error::EmptyMatch(*loc))
                 }
 
                 // Infer the return type of the first branch
@@ -154,10 +154,10 @@ impl Typechecker {
 
                 Ok(result_type)
             }
-            Expr::Func { .. } => {
-                Err(Error::CannotInferTypeOfFunctions)
+            Expr::Func { loc, .. } => {
+                Err(Error::CannotInferTypeOfFunctions(*loc))
             }
-            Expr::App { head, args, .. } => {
+            Expr::App { head, args, loc, .. } => {
                 // Infer the type of the function
                 let head_ty = self.infer_expr(local_variables, &head)?;
 
@@ -179,7 +179,7 @@ impl Typechecker {
                         Ok(Type::from_func_args(&func_arg_types.collect()))
                     }
                     _ => {
-                        return Err(Error::ExpectedFunctionType { actual_type: head_ty.clone() });
+                        return Err(Error::ExpectedFunctionType { loc: *loc, actual_type: head_ty.clone() });
                     }
                 }
             }
@@ -191,18 +191,13 @@ impl Typechecker {
     }
 
     fn check_match_expr(&self, local_variables: &LocalVariables, branches: &Vec<MatchBranch>, target_type: &Type, result_type: &Type) -> Result<(), Error> {
-        // There must be at least one branch
-        if branches.is_empty() {
-            return Err(Error::EmptyMatch)
-        }
-
         // For each subsequent branch...
         for branch in branches[1..].iter() {
             // Check the constructor yields `target_type`
             let ctor_ty = match self.constructors.get(&branch.constructor) {
-                None => { return Err(Error::UnknownConstructor(branch.constructor.clone())); }
-                Some(ty) => {
-                    self.assert_type_eq(&target_type, &ty)?;
+                None => { return Err(Error::UnknownConstructor(branch.loc(), branch.constructor.clone())); }
+                Some((loc, ty)) => {
+                    self.assert_type_eq(&target_type, &ty, *loc)?;
                     ty
                 }
             };
@@ -212,6 +207,7 @@ impl Typechecker {
             let num_args_in_ctor_type = ctor_ty_args.len();
             if num_args_in_ctor_type != branch.args.len() {
                 return Err(Error::MatchBranchArgNumberMismatch {
+                    loc: branch.loc(),
                     number_of_args_in_branch: branch.args.len(),
                     number_of_args_in_constructor_type: num_args_in_ctor_type
                 });
@@ -232,15 +228,15 @@ impl Typechecker {
         Ok(())
     }
 
-    fn infer_var(&self, local_variables: &LocalVariables, var: &Var) -> Result<Type, Error> {
+    fn infer_var(&self, local_variables: &LocalVariables, var: &Var, loc: Loc) -> Result<Type, Error> {
         match var {
             Var::Local(s) => {
-                self.lookup(local_variables, s)
+                self.lookup(local_variables, s, loc)
             }
             Var::Constructor(s) => {
                 match self.constructors.get(s) {
-                    Some(ty) => Ok(ty.clone()),
-                    None => Err(Error::UnknownConstructor(s.to_string()))
+                    Some((_, ty)) => Ok(ty.clone()),
+                    None => Err(Error::UnknownConstructor(loc, s.to_string()))
                 }
             }
             Var::Operator(op) => {
@@ -255,46 +251,46 @@ impl Typechecker {
         todo!()
     }
 
-    fn lookup(&self, local_variables: &LocalVariables, name: &str) -> Result<Type, Error> {
+    fn lookup(&self, local_variables: &LocalVariables, name: &str, loc: Loc) -> Result<Type, Error> {
         match local_variables.lookup(name) {
             Some(ty) => Ok(ty.clone()),
             None => {
                 match self.functions.get(name) {
                     Some((_, ty)) => Ok(ty.clone()),
-                    None => Err(Error::UnknownVariable(name.to_string()))
+                    None => Err(Error::UnknownVariable(loc, name.to_string()))
                 }
             }
         }
     }
 
-    fn assert_type_eq(&self, expected: &Type, actual: &Type) -> Result<(), Error> {
+    fn assert_type_eq(&self, expected: &Type, actual: &Type, loc: Loc) -> Result<(), Error> {
         if expected == actual {
             return Ok(());
         }
-        Err(Error::ExpectedType { expected: expected.clone(), actual: actual.clone() })
+        Err(Error::ExpectedType { loc, expected: expected.clone(), actual: actual.clone() })
     }
 
     /// Check the well-formedness of all registered types.
     /// We do this after registering, so that circular references are allowed.
     /// If we check each type up-front, we have to register them in reverse dependency order.
     pub fn check_all_types(&self) -> Result<(), Error> {
-        for ctor_type in self.constructors.values() {
-            self.check_type(ctor_type)?;
+        for (loc, ctor_type) in self.constructors.values() {
+            self.check_type(ctor_type, *loc)?;
         }
         Ok(())
     }
 
-    pub fn check_type(&self, ty: &Type) -> Result<(), Error> {
+    pub fn check_type(&self, ty: &Type, loc: Loc) -> Result<(), Error> {
         // Check that all mentioned types exist.
         match ty {
             Type::Named(n) => {
                 if !self.types.contains(n) {
-                    return Err(Error::UnknownType(n.to_string()))
+                    return Err(Error::UnknownType(loc, n.to_string()))
                 }
             },
             Type::Func(f, x) => {
-                self.check_type(f)?;
-                self.check_type(x)?;
+                self.check_type(f, loc)?;
+                self.check_type(x, loc)?;
             },
             Type::Int => {}
         }
