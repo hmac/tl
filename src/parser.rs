@@ -1,7 +1,5 @@
-use crate::ast::{Expr, Type, Decl, TypeConstructor, Var, Pattern, Operator};
+use crate::ast::{Expr, Type, Decl, TypeConstructor, Var, Pattern, Operator, Loc, HasLoc, SourceType};
 use std::collections::VecDeque;
-
-type Loc = usize;
 
 #[derive(Debug)]
 pub enum Error {
@@ -178,6 +176,7 @@ impl Parser {
     }
 
     fn parse_decl(&mut self) -> Result<Decl, Error> {
+        let loc = self.loc;
         match self.try_eat("type") {
             Some(_) => {
                 self.trim();
@@ -199,7 +198,7 @@ impl Parser {
                         }
                     }
                 }
-                Ok(Decl::Type{name, constructors })
+                Ok(Decl::Type{loc, name, constructors })
             },
             None => {
                 let name = self.parse_lower_ident()?;
@@ -213,12 +212,12 @@ impl Parser {
                 let body = self.parse_expr()?;
                 self.eat("}")?;
                 self.trim();
-                Ok(Decl::Func{name, r#type, body})
+                Ok(Decl::Func{loc, name, r#type, body})
             }
         }
     }
 
-    fn parse_type(&mut self) -> Result<Type, Error> {
+    fn parse_type(&mut self) -> Result<SourceType, Error> {
         // Parse a sequence of "type components", which are things that can make up a type.
         // We then construct the actual type from this sequence.
         // This allows us to deal with the '->' operator.
@@ -235,18 +234,18 @@ impl Parser {
         self.make_type_from_components(components)
     }
 
-    fn make_type_from_components(&self, mut components: Vec<(Loc, TypeComponent)>) -> Result<Type, Error> {
+    fn make_type_from_components(&self, mut components: Vec<(Loc, TypeComponent)>) -> Result<SourceType, Error> {
         if components.len() == 1 {
             return match components.pop().unwrap() {
-                (_, TypeComponent::Named(c)) => Ok(Type::Named(c)),
-                (_, TypeComponent::Int) => Ok(Type::Int),
+                (loc, TypeComponent::Named(c)) => Ok(SourceType::Named(loc, c)),
+                (loc, TypeComponent::Int) => Ok(SourceType::Int(loc)),
                 (loc, TypeComponent::Arrow) => Err(Error::ExpectedNamedType(loc))
             }
         }
 
         let ty = match components.pop().unwrap() {
-            (_, TypeComponent::Named(c)) => Type::Named(c),
-            (_, TypeComponent::Int) => Type::Int,
+            (loc, TypeComponent::Named(c)) => SourceType::Named(loc, c),
+            (loc, TypeComponent::Int) => SourceType::Int(loc),
             (loc, TypeComponent::Arrow) => { return Err(Error::ExpectedNamedType(loc)) }
         };
 
@@ -255,7 +254,7 @@ impl Parser {
                 match c {
                     TypeComponent::Arrow => {
                         let rest = self.make_type_from_components(components)?;
-                        Ok(Type::Func(Box::new(ty), Box::new(rest)))
+                        Ok(SourceType::Func(loc, Box::new(ty), Box::new(rest)))
                     }
                     TypeComponent::Named(_) | TypeComponent::Int => {
                         unimplemented!()
@@ -302,7 +301,7 @@ impl Parser {
         // function body.
         //
         // Otherwise, assume we're looking at a function application.
-        let mut exprs: VecDeque<(Loc, Expr)> = VecDeque::new();
+        let mut exprs: VecDeque<Expr> = VecDeque::new();
         loop {
             let loc = self.loc;
             match self.parse_expr_nested() {
@@ -312,10 +311,10 @@ impl Parser {
                     if self.input().starts_with("->") {
                         // Check that the preceding expressions are patterns
                         let mut args = vec![];
-                        for (loc, e) in exprs {
+                        for e in exprs {
                             match e {
-                                Expr::Var(Var::Local(n)) => {
-                                    args.push(Pattern::Var(n));
+                                Expr::Var(loc, Var::Local(n)) => {
+                                    args.push(Pattern::Var(loc, n));
                                 },
                                 _ => {return Err(Error::ExpectedPattern(loc));}
                             }
@@ -329,22 +328,22 @@ impl Parser {
                         let body = self.parse_expr()?;
                         self.trim();
 
-                        return Ok(Expr::Func { args, body: Box::new(body) })
+                        return Ok(Expr::Func { loc, args, body: Box::new(body) })
                     }
 
                     // It's not an arrow, so the preceding expressions form an application
                     // Construct the application
                     match exprs.pop_front() {
                         None => { return Err(Error::ExpectedExpr(self.loc)); }
-                        Some((_, f)) => {
-                            let args = exprs.into_iter().map(|(_, e)| e).collect();
-                            return Ok(Expr::App{head: Box::new(f), args});
+                        Some(f) => {
+                            let args = exprs.into_iter().collect();
+                            return Ok(Expr::App{loc: f.loc(), head: Box::new(f), args});
                         }
                     }
 
                 },
                 Ok(expr) => {
-                    exprs.push_back((loc, expr));
+                    exprs.push_back(expr);
                     self.trim();
                 }
             }
@@ -367,12 +366,14 @@ impl Parser {
             return Ok(e);
         }
         if self.input().starts_with(lower_ident_char) {
+            let loc = self.loc;
             let n = self.parse_lower_ident()?;
-            return Ok(Expr::Var(Var::Local(n)));
+            return Ok(Expr::Var(loc, Var::Local(n)));
         }
         if self.input().starts_with(upper_ident_char) {
+            let loc = self.loc;
             let n = self.parse_upper_ident()?;
-            return Ok(Expr::Var(Var::Constructor(n)));
+            return Ok(Expr::Var(loc, Var::Constructor(n)));
         }
         if self.input().starts_with(operator_char) {
             // To ensure we don't parse x -> y as x - <parse error>
@@ -396,8 +397,9 @@ impl Parser {
         let (s, _) = self.input().split_at(len);
         match s.parse() {
             Ok(n) => {
+                let r = Expr::Int(self.loc, n);
                 self.loc += len;
-                Ok(Expr::Int(n))
+                Ok(r)
             },
             Err(_) => Err(Error::ExpectedInteger(self.loc)),
         }
@@ -411,12 +413,13 @@ impl Parser {
             '*' => Operator::Mul,
             _ => { return Err(Error::ExpectedOperator(self.loc - 1)); }
         };
-        Ok(Expr::Var(Var::Operator(op)))
+        Ok(Expr::Var(self.loc - 1, Var::Operator(op)))
     }
 
     fn parse_type_constructor(&mut self) -> Result<TypeConstructor, Error> {
+        let loc = self.loc;
         let name = self.parse_upper_ident()?;
-        Ok(TypeConstructor { name, variables: vec![], arguments: vec![] })
+        Ok(TypeConstructor { loc, name, variables: vec![], arguments: vec![] })
     }
 
     fn parse_upper_ident(&mut self) -> Result<String, Error> {

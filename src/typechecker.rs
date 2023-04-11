@@ -20,7 +20,7 @@ pub enum Error {
 pub struct Typechecker {
     constructors: HashMap<String, Type>,
     types: HashSet<String>,
-    functions: HashMap<String, Type>,
+    functions: HashMap<String, (Loc, Type)>,
 
 }
 
@@ -50,25 +50,27 @@ impl Typechecker {
         Ok(())
     }
 
-    pub fn register_func(&mut self, name: &str, r#type: &Type) -> Result<(), Error> {
+    pub fn register_func(&mut self, name: &str, source_type: &SourceType, loc: Loc) -> Result<(), Error> {
         // Check that function name is not already in use
         // Check that type is well-formed
-        self.functions.insert(name.to_string(), r#type.clone());
+        let ty = Type::from_source_type(&source_type);
+        self.functions.insert(name.to_string(), (loc, ty));
         Ok(())
     }
 
-    pub fn check_func(&self, func: &Expr, expected_type: &Type) -> Result<(), Error> {
-        self.check_expr(&LocalVariables::new(), func, expected_type)
+    pub fn check_func(&self, func: &Expr, expected_type: &SourceType) -> Result<(), Error> {
+        let ty = Type::from_source_type(expected_type);
+        self.check_expr(&LocalVariables::new(), func, &ty)
     }
 
     fn check_expr(&self, local_variables: &LocalVariables, expr: &Expr, expected_type: &Type) -> Result<(), Error> {
         match expr {
-            Expr::Int(_) => self.assert_type_eq(expected_type, &TYPE_INT),
-            Expr::Var(v) => {
+            Expr::Int(_,_) => self.assert_type_eq(expected_type, &TYPE_INT),
+            Expr::Var(_, v) => {
                 let ty = self.infer_var(local_variables, v)?;
                 self.assert_type_eq(expected_type, &ty)
             }
-            Expr::Match { target, branches } => {
+            Expr::Match { target, branches, .. } => {
                 // Infer the type of the target
                 let target_type = self.infer_var(local_variables, target)?;
 
@@ -81,7 +83,7 @@ impl Typechecker {
 
                 Ok(())
             }
-            Expr::Func { args, body } => {
+            Expr::Func { args, body, .. } => {
                 // Deconstruct expected type
                 let mut func_arg_types = expected_type.func_args().into_iter();
 
@@ -92,7 +94,7 @@ impl Typechecker {
                     match func_arg_types.next() {
                         Some(arg_type) => {
                             self.check_pattern(arg, arg_type)?;
-                            let Pattern::Var(v) = arg;
+                            let Pattern::Var(_, v) = arg;
                             new_locals.insert(v.to_string(), arg_type.clone());
                         }
                         None => { todo!("what error?"); }
@@ -106,7 +108,7 @@ impl Typechecker {
 
                 self.check_expr(&LocalVariables::extend(&local_variables, new_locals), body, &result_type)
             }
-            Expr::App { head, args } => {
+            Expr::App { head, args, .. } => {
                 // Infer type of head
                 let head_type = self.infer_expr(local_variables, head)?;
 
@@ -134,9 +136,9 @@ impl Typechecker {
 
     fn infer_expr(&self, local_variables: &LocalVariables, expr: &Expr) -> Result<Type, Error> {
         match expr {
-            Expr::Int(_) => Ok(TYPE_INT),
-            Expr::Var(v) => self.infer_var(local_variables, v),
-            Expr::Match { target, branches } => {
+            Expr::Int(_, _) => Ok(TYPE_INT),
+            Expr::Var(_, v) => self.infer_var(local_variables, v),
+            Expr::Match { target, branches, .. } => {
                 // Infer the type of the target
                 let target_type = self.infer_var(local_variables, target)?;
 
@@ -155,7 +157,7 @@ impl Typechecker {
             Expr::Func { .. } => {
                 Err(Error::CannotInferTypeOfFunctions)
             }
-            Expr::App { head, args } => {
+            Expr::App { head, args, .. } => {
                 // Infer the type of the function
                 let head_ty = self.infer_expr(local_variables, &head)?;
 
@@ -218,7 +220,7 @@ impl Typechecker {
             // Add each pattern to the set of local variables
             let mut new_vars = HashMap::new();
             for (pattern, ty) in branch.args.iter().zip(ctor_ty_args.into_iter()) {
-                let Pattern::Var(n) = pattern;
+                let Pattern::Var(_, n) = pattern;
                 new_vars.insert(n.to_string(), ty.clone());
             }
             let local_variables = LocalVariables::extend(&local_variables, new_vars);
@@ -258,7 +260,7 @@ impl Typechecker {
             Some(ty) => Ok(ty.clone()),
             None => {
                 match self.functions.get(name) {
-                    Some(ty) => Ok(ty.clone()),
+                    Some((_, ty)) => Ok(ty.clone()),
                     None => Err(Error::UnknownVariable(name.to_string()))
                 }
             }
@@ -309,7 +311,7 @@ fn make_constructor_type(type_name: &str, constructor: &TypeConstructor) -> Type
 
     let mut ty = Type::Named(type_name.to_string());
     for a in constructor.arguments.iter().rev().cloned() {
-        ty = Type::Func(Box::new(a), Box::new(ty));
+        ty = Type::Func(Box::new(Type::from_source_type(&a)), Box::new(ty));
     }
     ty
 }

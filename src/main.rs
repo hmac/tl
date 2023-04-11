@@ -12,11 +12,11 @@ fn main() {
 
             for decl in &ast {
                 match decl {
-                    ast::Decl::Type { name, constructors } => {
+                    ast::Decl::Type { name, constructors, .. } => {
                         typechecker.register_type(&name, &constructors).unwrap();
                     }
-                    ast::Decl::Func { name, r#type, .. } => {
-                        typechecker.register_func(&name, &r#type).unwrap();
+                    ast::Decl::Func { name, r#type, loc, .. } => {
+                        typechecker.register_func(&name, &r#type, *loc).unwrap();
                     }
                 }
             }
