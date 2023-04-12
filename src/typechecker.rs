@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 
@@ -224,7 +224,7 @@ impl Typechecker {
                             self.check_expr(local_variables, arg, ty)?;
                         }
                         None => {
-                            return todo!("what error to return here?");
+                            todo!("what error to return here?");
                         }
                     }
                 }
@@ -283,7 +283,7 @@ impl Typechecker {
                                     self.check_expr(local_variables, arg, arg_type)?;
                                 }
                                 None => {
-                                    return todo!("what error to return here?");
+                                    todo!("what error to return here?");
                                 }
                             }
                         }
@@ -302,7 +302,8 @@ impl Typechecker {
         }
     }
 
-    fn check_pattern(&self, pattern: &Pattern, expected_type: &Type) -> Result<(), Error> {
+    fn check_pattern(&self, _pattern: &Pattern, _expected_type: &Type) -> Result<(), Error> {
+        // Patterns are currently just variables, so are always OK
         Ok(())
     }
 
@@ -379,10 +380,44 @@ impl Typechecker {
     fn infer_match_branch(
         &self,
         local_variables: &LocalVariables,
-        target_ty: &Type,
+        target_type: &Type,
         branch: &MatchBranch,
     ) -> Result<Type, Error> {
-        todo!()
+        // Lookup the type of the constructor and check it matches the target type.
+        let ctor_ty = match self.constructors.get(&branch.constructor) {
+            None => {
+                return Err(Error::UnknownConstructor(
+                    branch.loc(),
+                    branch.constructor.clone(),
+                ));
+            }
+            Some((loc, ty)) => {
+                self.assert_type_eq(&target_type, &ty, *loc)?;
+                ty
+            }
+        };
+
+        // Check the constructor has the right number of args
+        let ctor_ty_args = ctor_ty.func_args();
+        let num_args_in_ctor_type = ctor_ty_args.len() - 1; // last elem is the result type
+        if num_args_in_ctor_type != branch.args.len() {
+            return Err(Error::MatchBranchArgNumberMismatch {
+                loc: branch.loc(),
+                number_of_args_in_branch: branch.args.len(),
+                number_of_args_in_constructor_type: num_args_in_ctor_type,
+            });
+        }
+
+        // Add each pattern to the set of local variables
+        let mut new_vars = HashMap::new();
+        for (pattern, ty) in branch.args.iter().zip(ctor_ty_args.into_iter()) {
+            let Pattern::Var(_, n) = pattern;
+            new_vars.insert(n.to_string(), ty.clone());
+        }
+        let local_variables = LocalVariables::extend(&local_variables, new_vars);
+
+        // Infer the rhs
+        self.infer_expr(&local_variables, &branch.rhs)
     }
 
     fn lookup(
