@@ -1,10 +1,9 @@
-use std::io::read_to_string;
-use std::io::stdin;
-
 use tl::{ast, parser, typechecker};
 
 fn main() {
-    let input = read_to_string(stdin()).unwrap();
+    let input_file = std::env::args().nth(1).unwrap();
+    let input = std::fs::read_to_string(input_file).unwrap();
+
     let mut parser = parser::Parser::new(input);
     match parser.parse() {
         Ok(ast) => {

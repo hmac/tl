@@ -558,10 +558,3 @@ enum TypeComponent {
     Named(String),
     Int,
 }
-
-#[derive(Debug)]
-enum ExprComponent {
-    Var(String),
-    Constructor(String),
-    Int(u64),
-}
