@@ -112,19 +112,20 @@ impl Parser {
 
     fn trim(&mut self) {
         let mut len = 0;
-        while self.input()[len..].starts_with(whitespace_char) {
-            len += 1;
-        }
 
-        // Skip line comments
         loop {
+            // Skip line comments
             if self.input()[len..].starts_with("//") {
                 while !self.input()[len..].starts_with('\n') {
                     len += 1;
                 }
                 len += 1;
             } else {
-                break;
+                if self.input()[len..].starts_with(whitespace_char) {
+                    len += 1;
+                } else {
+                    break;
+                }
             }
         }
 
