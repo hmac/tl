@@ -207,10 +207,10 @@ impl Type {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     Var(Loc, Var),
-    Int(Loc, u64),
+    Int(Loc, i64),
     Match {
         loc: Loc,
         target: Var,
@@ -240,7 +240,7 @@ impl HasLoc for Expr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MatchBranch {
     pub loc: Loc,
     pub constructor: String,
@@ -254,7 +254,7 @@ impl HasLoc for MatchBranch {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Pattern {
     Var(Loc, String),
 }
@@ -275,14 +275,14 @@ impl HasLoc for Pattern {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Var {
     Local(String),
     Constructor(String),
     Operator(Operator),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Operator {
     Add,
     Sub,

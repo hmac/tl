@@ -8,9 +8,9 @@ f : Int -> Int -> Int { x y -> + x y }
 
 g : Int -> Int -> Int { x y -> - (*  x y) x }
 
-main : Int {
+main : BoolPair {
   // comment inside function
-  g 4 53434
+  MkPair True (not True)
 }
 
 not : Bool -> Bool {
@@ -18,6 +18,10 @@ not : Bool -> Bool {
     True -> False, // comment at end of line
     False -> True
   }
+}
+
+constint : Int -> Int -> Int {
+  x y -> x
 }
 
 type Unit { Unit }

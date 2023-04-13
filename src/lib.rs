@@ -1,6 +1,8 @@
 pub mod ast;
 pub mod parser;
 pub mod typechecker;
+pub mod interpreter;
+mod local_variables;
 
 use std::io::Write;
 
@@ -33,7 +35,7 @@ pub fn run<W:Write>(input: String, output: &mut W) -> std::io::Result<()> {
 
             typechecker.check_all_types().unwrap();
 
-            for decl in ast {
+            for decl in &ast {
                 match decl {
                     ast::Decl::Func { r#type, body, .. } => {
                         if let Err(error) = typechecker.check_func(&body, &r#type) {
@@ -47,6 +49,28 @@ pub fn run<W:Write>(input: String, output: &mut W) -> std::io::Result<()> {
             }
 
             writeln!(output, "Typecheck successful.")?;
+
+            let mut interpreter = interpreter::Interpreter::new();
+
+            for decl in &ast {
+                match decl {
+                    ast::Decl::Func { name, body, .. } => {
+                        interpreter.register_func(name, &body);
+                    }
+                    _ => {}
+                }
+            }
+
+            for decl in &ast {
+                match decl {
+                    ast::Decl::Func { name, body, .. } if name == "main" => {
+                        let locals = local_variables::LocalVariables::new();
+                        let result = interpreter.eval(&locals, &body).unwrap();
+                        writeln!(output, "Result: {:?}", result)?;
+                    }
+                    _ => {}
+                }
+            }
         }
         Err(error) => {
             writeln!(output, "Error:\n")?;

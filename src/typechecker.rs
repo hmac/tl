@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ast::*;
+use crate::local_variables::LocalVariables;
 
 const TYPE_INT: Type = Type::Int;
 
@@ -182,7 +183,7 @@ impl Typechecker {
 
     fn check_expr(
         &self,
-        local_variables: &LocalVariables,
+        local_variables: &LocalVariables<Type>,
         expr: &Expr,
         expected_type: &Type,
     ) -> Result<(), Error> {
@@ -236,7 +237,7 @@ impl Typechecker {
                 // TODO: use new locals when checking body
 
                 self.check_expr(
-                    &LocalVariables::extend(&local_variables, new_locals),
+                    &local_variables.extend(new_locals),
                     body,
                     &result_type,
                 )
@@ -289,7 +290,7 @@ impl Typechecker {
         }
     }
 
-    fn infer_expr(&self, local_variables: &LocalVariables, expr: &Expr) -> Result<Type, Error> {
+    fn infer_expr(&self, local_variables: &LocalVariables<Type>, expr: &Expr) -> Result<Type, Error> {
         match expr {
             Expr::Int(_, _) => Ok(TYPE_INT),
             Expr::Var(loc, v) => self.infer_var(local_variables, v, *loc),
@@ -361,7 +362,7 @@ impl Typechecker {
 
     fn check_match_expr(
         &self,
-        local_variables: &LocalVariables,
+        local_variables: &LocalVariables<Type>,
         branches: &Vec<MatchBranch>,
         target_type: &Type,
         result_type: &Type,
@@ -401,7 +402,7 @@ impl Typechecker {
                 let Pattern::Var(_, n) = pattern;
                 new_vars.insert(n.to_string(), ty.clone());
             }
-            let local_variables = LocalVariables::extend(&local_variables, new_vars);
+            let local_variables = local_variables.extend(new_vars);
 
             // Check the branch rhs has result_type
             self.check_expr(&local_variables, &branch.rhs, result_type)?;
@@ -412,7 +413,7 @@ impl Typechecker {
 
     fn infer_var(
         &self,
-        local_variables: &LocalVariables,
+        local_variables: &LocalVariables<Type>,
         var: &Var,
         loc: Loc,
     ) -> Result<Type, Error> {
@@ -433,7 +434,7 @@ impl Typechecker {
 
     fn infer_match_branch(
         &self,
-        local_variables: &LocalVariables,
+        local_variables: &LocalVariables<Type>,
         target_type: &Type,
         branch: &MatchBranch,
     ) -> Result<Type, Error> {
@@ -468,7 +469,7 @@ impl Typechecker {
             let Pattern::Var(_, n) = pattern;
             new_vars.insert(n.to_string(), ty.clone());
         }
-        let local_variables = LocalVariables::extend(&local_variables, new_vars);
+        let local_variables = local_variables.extend(new_vars);
 
         // Infer the rhs
         self.infer_expr(&local_variables, &branch.rhs)
@@ -476,7 +477,7 @@ impl Typechecker {
 
     fn lookup(
         &self,
-        local_variables: &LocalVariables,
+        local_variables: &LocalVariables<Type>,
         name: &str,
         loc: Loc,
     ) -> Result<Type, Error> {
@@ -546,35 +547,4 @@ fn make_constructor_type(type_name: &str, constructor: &TypeConstructor) -> Type
         ty = Type::Func(Box::new(Type::from_source_type(&a)), Box::new(ty));
     }
     ty
-}
-
-/// A linked list of local variable maps.
-/// This makes it easy to add new variables for typechecking a specific subexpression,
-/// without affecting the variables in scope for the parent call.
-enum LocalVariables<'a> {
-    One(HashMap<String, Type>),
-    More(HashMap<String, Type>, &'a LocalVariables<'a>),
-}
-
-impl<'a> LocalVariables<'a> {
-    pub fn new() -> Self {
-        Self::One(HashMap::new())
-    }
-
-    pub fn lookup(&self, name: &str) -> Option<&Type> {
-        match self {
-            Self::One(stack) => match stack.get(name) {
-                Some(ty) => Some(ty),
-                None => None,
-            },
-            Self::More(stack, rest) => match stack.get(name) {
-                Some(ty) => Some(ty),
-                None => rest.lookup(name),
-            },
-        }
-    }
-
-    pub fn extend(vars: &'a Self, stack: HashMap<String, Type>) -> LocalVariables<'a> {
-        Self::More(stack, &vars)
-    }
 }
