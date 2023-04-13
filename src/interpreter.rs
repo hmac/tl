@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ast::{Expr, TypeConstructor, Pattern, Var, Operator};
+use crate::ast::{Expr, TypeConstructor, Pattern, Var, Operator, MatchBranch};
 use crate::local_variables::LocalVariables;
 
 pub struct Interpreter {
@@ -93,16 +93,28 @@ impl Interpreter {
 
                 // Check its constructor.
                 match target_value {
-                    Value::Int(_) => todo!(),
+                    Value::Int(n) => {
+                        // Find a branch that matches n
+                        for branch in branches {
+                            match branch {
+                                MatchBranch::Int { int, rhs, .. } if *int == n => {
+                                    return self.eval(locals, &rhs);
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(Error::NoMatchingBranch)
+                    },
                     Value::Constructor { name, applied_args } => {
                         // Find a branch that matches the constructor name
-                        match branches.iter().find(|branch| branch.constructor == name ) {
-                            Some(branch) => {
+                        match branches.iter().find(|branch| branch.has_constructor(&name) ) {
+                            Some(MatchBranch::Constructor { args, rhs, .. }) => {
                                 // Bind the branch args
-                                let new_locals = self.build_locals_from_func_args(branch.args.clone(), applied_args);
+                                let new_locals = self.build_locals_from_func_args(args.clone(), applied_args);
                                 // Evaluate the rhs
-                                self.eval(&locals.extend(new_locals), &branch.rhs)
+                                self.eval(&locals.extend(new_locals), &rhs)
                             }
+                            Some(MatchBranch::Int { .. }) => unreachable!(),
                             None => {
                                 Err(Error::NoMatchingBranch)
                             }
@@ -143,8 +155,12 @@ impl Interpreter {
     fn build_locals_from_func_args(&self, params: Vec<Pattern>, args: Vec<Value>) -> HashMap<String, Value> {
         let mut new_locals = HashMap::new();
         for (param, arg) in params.into_iter().zip(args.into_iter()) {
-            let Pattern::Var(_, p) = param;
-            new_locals.insert(p.to_string(), arg);
+            match param {
+                Pattern::Var(_, p) => {
+                    new_locals.insert(p.to_string(), arg);
+                }
+                Pattern::Int(_, _) => {}
+            }
         }
         new_locals
     }

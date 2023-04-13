@@ -325,7 +325,8 @@ impl Parser {
 
     fn parse_expr(&mut self) -> Result<Expr, Error> {
         if self.input().starts_with(numeric_char) {
-            return self.parse_int();
+            let (loc, n) = self.parse_int()?;
+            return Ok(Expr::Int(loc, n));
         }
         if self.input().starts_with("match") {
             return self.parse_match();
@@ -410,7 +411,8 @@ impl Parser {
     /// Like `parse_expr` but functions and applications must be wrapped in parens.
     fn parse_expr_nested(&mut self) -> Result<Expr, Error> {
         if self.input().starts_with(numeric_char) {
-            return self.parse_int();
+            let (loc, n) = self.parse_int()?;
+            return Ok(Expr::Int(loc, n));
         }
         if self.input().starts_with("match") {
             return self.parse_match();
@@ -491,31 +493,48 @@ impl Parser {
     }
 
     fn parse_match_branch(&mut self) -> Result<MatchBranch, Error> {
-        let loc = self.loc;
-        let constructor = self.parse_upper_ident()?;
-        self.trim();
-        let mut args = vec![];
-        loop {
-            if self.input().starts_with("->") {
-                break;
-            }
-            let loc = self.loc;
-            let pat = self.parse_lower_ident()?;
-            args.push(Pattern::Var(loc, pat));
+        if self.input().starts_with(numeric_char) {
+            // Int branch
+            let (loc, int) = self.parse_int()?;
             self.trim();
+            self.eat("->")?;
+            self.trim();
+            let rhs = self.parse_expr()?;
+            Ok(MatchBranch::Int { loc, int, rhs })
+        } else {
+            // Constructor branch
+            let loc = self.loc;
+            let constructor = self.parse_upper_ident()?;
+            self.trim();
+            let mut args = vec![];
+            loop {
+                if self.input().starts_with("->") {
+                    break;
+                }
+                let pat = if self.input().starts_with(numeric_char) {
+                    let (loc, n) = self.parse_int()?;
+                    Pattern::Int(loc, n)
+                } else {
+                    let loc = self.loc;
+                    let var = self.parse_lower_ident()?;
+                    Pattern::Var(loc, var)
+                };
+                args.push(pat);
+                self.trim();
+            }
+            self.eat("->")?;
+            self.trim();
+            let rhs = self.parse_expr()?;
+            Ok(MatchBranch::Constructor {
+                loc,
+                constructor,
+                args,
+                rhs,
+            })
         }
-        self.eat("->")?;
-        self.trim();
-        let rhs = self.parse_expr()?;
-        Ok(MatchBranch {
-            loc,
-            constructor,
-            args,
-            rhs,
-        })
     }
 
-    fn parse_int(&mut self) -> Result<Expr, Error> {
+    fn parse_int(&mut self) -> Result<(Loc, i64), Error> {
         let mut len = 0;
         while self.input()[len..].starts_with(char::is_numeric) {
             len += 1;
@@ -524,7 +543,7 @@ impl Parser {
         let (s, _) = self.input().split_at(len);
         match s.parse() {
             Ok(n) => {
-                let r = Expr::Int(self.loc, n);
+                let r = (self.loc, n);
                 self.loc += len;
                 Ok(r)
             }
