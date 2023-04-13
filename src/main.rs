@@ -1,55 +1,7 @@
-use tl::{ast, parser, typechecker};
-
 fn main() {
     let input_file = std::env::args().nth(1).unwrap();
     let input = std::fs::read_to_string(input_file).unwrap();
 
-    let mut parser = parser::Parser::new(input);
-    match parser.parse() {
-        Ok(ast) => {
-            let mut typechecker = typechecker::Typechecker::new();
-
-            for decl in &ast {
-                match decl {
-                    ast::Decl::Type {
-                        name,
-                        constructors,
-                        loc,
-                    } => {
-                        if let Err(error) = typechecker.register_type(&name, &constructors, *loc) {
-                            println!("Error:\n");
-                            ast::print_error(&parser.into_input(), error);
-                            return;
-                        }
-                    }
-                    ast::Decl::Func {
-                        name, r#type, loc, ..
-                    } => {
-                        typechecker.register_func(&name, &r#type, *loc).unwrap();
-                    }
-                }
-            }
-
-            typechecker.check_all_types().unwrap();
-
-            for decl in ast {
-                match decl {
-                    ast::Decl::Func { r#type, body, .. } => {
-                        if let Err(error) = typechecker.check_func(&body, &r#type) {
-                            println!("Error:\n");
-                            ast::print_error(&parser.into_input(), error);
-                            return;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            println!("Typecheck successful.");
-        }
-        Err(error) => {
-            println!("Error:\n");
-            ast::print_error(&parser.into_input(), error);
-        }
-    }
+    let mut stdout = std::io::stdout();
+    tl::run(input.to_string(), &mut stdout).unwrap();
 }

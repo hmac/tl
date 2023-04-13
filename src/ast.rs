@@ -65,7 +65,7 @@ fn string_index_to_line_col_number(
 //     ^
 // expected '-'
 //
-pub fn print_error<E: std::fmt::Display + HasLoc>(orig: &str, error: E) {
+pub fn print_error<E: std::fmt::Display + HasLoc, W: std::io::Write>(writer: &mut W, orig: &str, error: E) {
     let loc = error.loc();
     let newlines = calculate_lines(orig);
     let (line, col) = string_index_to_line_col_number(loc, &newlines);
@@ -73,13 +73,13 @@ pub fn print_error<E: std::fmt::Display + HasLoc>(orig: &str, error: E) {
 
     // Print the previous line, if it exists
     if line > 1 {
-        println!("{:>4}: {}", line - 1, source_lines.nth(line - 2).unwrap());
-        println!("{:>4}: {}", line, source_lines.next().unwrap());
+        writeln!(writer, "{:>4}: {}", line - 1, source_lines.nth(line - 2).unwrap()).unwrap();
+        writeln!(writer, "{:>4}: {}", line, source_lines.next().unwrap()).unwrap();
     } else {
-        println!("{:>4}: {}", line, source_lines.nth(line - 1).unwrap());
+        writeln!(writer, "{:>4}: {}", line, source_lines.nth(line - 1).unwrap()).unwrap();
     }
-    println!("     {}^", " ".repeat(col));
-    println!("     {} {}", " ".repeat(col), error.to_string());
+    writeln!(writer, "     {}^", " ".repeat(col)).unwrap();
+    writeln!(writer, "     {} {}", " ".repeat(col), error.to_string()).unwrap();
 }
 
 /// A trait for types that have a source location.
