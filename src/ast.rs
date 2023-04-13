@@ -14,21 +14,35 @@ fn string_index_to_line_col_number(
     // we look for the first consecutive pair of newline indices (i, j)
     // where i <= string_index <= j
     // if no such pair exists, the location must be on the first line
-    let line = {
-        newline_indices
-            .windows(2)
-            .position(|i_j| {
-                let i = i_j[0];
-                let j = i_j[1];
-                i <= string_index && string_index <= j
-            })
-            .unwrap_or(0)
-    };
+
+    let mut line: Option<usize> = None;
     // the string index of the newline preceding this line (or 0 if it's the first line)
-    let line_index = newline_indices.get(line).unwrap_or(&0);
+    let mut line_index = None;
+
+    if let Some(i) = newline_indices.last() {
+        if string_index > *i {
+            // The location is on the last line
+            line = Some(newline_indices.len() - 1);
+            line_index = Some(*i);
+        }
+    }
+
+    for (n, i_j) in newline_indices.windows(2).enumerate() {
+        let i = i_j[0];
+        let j = i_j[1];
+        if i <= string_index && string_index <= j {
+            line = Some(n);
+            line_index = Some(i);
+        }
+    }
+
+    let line = line.unwrap_or(0);
+    let line_index = line_index.unwrap_or(0);
+
     // the column position in the line
     let col = string_index - line_index;
-    (line + 2, col + 1)
+
+    (line + 2, col)
 }
 
 // Print the line before the error location,
@@ -56,8 +70,8 @@ pub fn print_error<E: std::fmt::Display + HasLoc>(orig: &str, error: E) {
             println!("{:>4}: {}", line, source_lines.nth(line - 1).unwrap());
         }
     }
-    println!("      {}^", " ".repeat(col));
-    println!("      {} {}", " ".repeat(col), error.to_string());
+    println!("      {}^", " ".repeat(col-1));
+    println!("      {} {}", " ".repeat(col-1), error.to_string());
 }
 
 /// A trait for types that have a source location.
@@ -109,6 +123,11 @@ pub enum SourceType {
     Named(Loc, String),
     Func(Loc, Box<SourceType>, Box<SourceType>),
     Int(Loc),
+    App {
+        loc: Loc,
+        head: Box<SourceType>,
+        args: Vec<SourceType>,
+    },
 }
 
 impl HasLoc for SourceType {
@@ -117,6 +136,7 @@ impl HasLoc for SourceType {
             Self::Named(loc, _) => *loc,
             Self::Func(loc, _, _) => *loc,
             Self::Int(loc) => *loc,
+            Self::App { loc, ..} => *loc,
         }
     }
 }
@@ -127,6 +147,56 @@ pub enum Type {
     Named(String),
     Func(Box<Type>, Box<Type>),
     Int,
+    App { head: Box<Type>, args: Vec<Type> },
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        self.fmt_with_context(f, TypeFormatContext::Neutral)
+    }
+}
+
+enum TypeFormatContext {
+    Neutral,
+    FuncLeft,
+    AppRight,
+    AppLeft,
+}
+
+impl Type {
+    fn fmt_with_context(&self, f: &mut std::fmt::Formatter<'_>, context: TypeFormatContext) -> Result<(), std::fmt::Error> {
+        match self {
+            Type::Named(n) => write!(f, "{}", n),
+            Type::Func(func, arg) => match context {
+                TypeFormatContext::Neutral => {
+                    (*func).fmt_with_context(f, TypeFormatContext::FuncLeft)?;
+                    write!(f, " -> ")?;
+                    (*arg).fmt_with_context(f, TypeFormatContext::Neutral)
+                }
+                TypeFormatContext::FuncLeft | TypeFormatContext::AppRight | TypeFormatContext::AppLeft => {
+                    write!(f, "(")?;
+                    self.fmt_with_context(f, TypeFormatContext::Neutral)?;
+                    write!(f, ")")
+                }
+            }
+            Type::Int => write!(f, "Int"),
+            Type::App { head, args } => match context {
+                TypeFormatContext::Neutral | TypeFormatContext::AppLeft => {
+                    (*head).fmt_with_context(f, TypeFormatContext::AppLeft)?;
+                    write!(f, " ")?;
+                    for arg in args {
+                        arg.fmt_with_context(f, TypeFormatContext::AppRight)?;
+                    }
+                    Ok(())
+                },
+                TypeFormatContext::FuncLeft | TypeFormatContext::AppRight => {
+                    write!(f, "(")?;
+                    self.fmt_with_context(f, TypeFormatContext::Neutral)?;
+                    write!(f, ")")
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -179,6 +249,14 @@ impl HasLoc for MatchBranch {
 #[derive(Debug)]
 pub enum Pattern {
     Var(Loc, String),
+}
+
+impl std::fmt::Display for Pattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Pattern::Var(_, n) => write!(f, "{}", n)
+        }
+    }
 }
 
 impl HasLoc for Pattern {
@@ -246,6 +324,11 @@ impl Type {
                 Self::Func(Box::new(f), Box::new(x))
             }
             SourceType::Int(_) => Type::Int,
+            SourceType::App { head, args, .. } => {
+                let head = Type::from_source_type(head);
+                let args = args.iter().map(|arg| Type::from_source_type(arg)).collect();
+                Self::App { head: Box::new(head), args }
+            }
         }
     }
 }

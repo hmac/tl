@@ -134,8 +134,11 @@ impl Parser {
 
     pub fn parse(&mut self) -> Result<Vec<Decl>, Error> {
         let mut decls = vec![];
-        while !self.input().is_empty() {
+        loop {
             self.trim();
+            if self.input().is_empty() {
+                break;
+            }
             let decl = self.parse_decl()?;
             decls.push(decl);
         }
@@ -196,7 +199,7 @@ impl Parser {
     fn parse_type(&mut self) -> Result<SourceType, Error> {
         // Parse a sequence of "type components", which are things that can make up a type.
         // We then construct the actual type from this sequence.
-        // This allows us to deal with the '->' operator.
+        // This allows us to deal with arrows and type applications.
         let mut components = vec![];
         loop {
             match self.try_parse_type_component() {
@@ -214,22 +217,41 @@ impl Parser {
         self.make_type_from_components(components)
     }
 
+    // Like `parse_type`, but in a context where multi-word types must be parenthesised.
+    // e.g.
+    // Bool
+    // (Bool -> Bool)
+    // (Foo Bar)
+    // (Foo -> Bar Baz)
+    fn parse_type_nested(&mut self) -> Result<SourceType, Error> {
+        if self.input().starts_with("(") {
+            // Parse a normal type
+            self.eat("(")?;
+            self.trim();
+            let ty = self.parse_type()?;
+            self.trim();
+            self.eat(")")?;
+            self.trim();
+            return Ok(ty);
+        } else {
+            let loc = self.loc;
+            let type_name = self.parse_upper_ident()?;
+            Ok(SourceType::Named(loc, type_name))
+        }
+    }
+
     fn make_type_from_components(
         &self,
         mut components: Vec<(Loc, TypeComponent)>,
     ) -> Result<SourceType, Error> {
         if components.len() == 1 {
-            return match components.pop().unwrap() {
-                (loc, TypeComponent::Named(c)) => Ok(SourceType::Named(loc, c)),
-                (loc, TypeComponent::Int) => Ok(SourceType::Int(loc)),
-                (loc, TypeComponent::Arrow) => Err(Error::ExpectedNamedType(loc)),
-            };
+            let (loc, c) = components.pop().unwrap();
+            return self.make_type_from_single_component(loc, c);
         }
 
-        let ty = match components.pop().unwrap() {
-            (loc, TypeComponent::Named(c)) => SourceType::Named(loc, c),
-            (loc, TypeComponent::Int) => SourceType::Int(loc),
-            (loc, TypeComponent::Arrow) => return Err(Error::ExpectedNamedType(loc)),
+        let ty = {
+            let (loc, c) = components.pop().unwrap();
+            self.make_type_from_single_component(loc, c)?
         };
 
         match components.pop() {
@@ -238,13 +260,51 @@ impl Parser {
                     let rest = self.make_type_from_components(components)?;
                     Ok(SourceType::Func(loc, Box::new(ty), Box::new(rest)))
                 }
-                TypeComponent::Named(_) | TypeComponent::Int => {
-                    unimplemented!()
-                }
+                TypeComponent::Named(_) | TypeComponent::Int =>{
+                    // We have two non-arrow types in a row, so we're looking at a type
+                    // application. Take components from the list until we reach the end or we
+                    // reach an arrow.
+
+                    // The first arg of the application is the component we've just popped.
+                    let first_arg = self.make_type_from_single_component(loc, c)?;
+                    let mut args = vec![first_arg];
+
+                    loop {
+                        let c = components.pop();
+                        match c {
+                            Some((_, TypeComponent::Arrow)) => { break; },
+                            Some((loc, c)) => {
+                                let c_ty = self.make_type_from_single_component(loc, c)?;
+                                args.push(c_ty);
+                            }
+                            None => { break; }
+                        }
+                    }
+                    let app = SourceType::App { loc: ty.loc(), head: Box::new(ty), args };
+
+                    // If there are components left, then we have just parsed a type application to
+                    // the left of an arrow.
+                    if !components.is_empty() {
+                        let rest = self.make_type_from_components(components)?;
+                        Ok(SourceType::Func(loc, Box::new(app), Box::new(rest)))
+                    } else {
+                        // Otherwise, we're done and the result is the application.
+                        Ok(app)
+                    }
+                },
             },
             None => Ok(ty),
         }
     }
+
+    fn make_type_from_single_component(&self, loc: Loc, component: TypeComponent) -> Result<SourceType, Error> {
+        match component {
+            TypeComponent::Named(c) => Ok(SourceType::Named(loc, c)),
+            TypeComponent::Int => Ok(SourceType::Int(loc)),
+            TypeComponent::Arrow => Err(Error::ExpectedNamedType(loc)),
+        }
+    }
+
 
     fn try_parse_type_component(&mut self) -> Option<(Loc, TypeComponent)> {
         let loc = self.loc;
@@ -486,11 +546,22 @@ impl Parser {
     fn parse_type_constructor(&mut self) -> Result<TypeConstructor, Error> {
         let loc = self.loc;
         let name = self.parse_upper_ident()?;
+        self.trim();
+        let mut arguments = vec![];
+        loop {
+            if self.input().starts_with(upper_ident_char)  || self.input().starts_with("(") {
+                let arg = self.parse_type_nested()?;
+                self.trim();
+                arguments.push(arg);
+            } else {
+                break;
+            } 
+        }
         Ok(TypeConstructor {
             loc,
             name,
             variables: vec![],
-            arguments: vec![],
+            arguments,
         })
     }
 

@@ -65,7 +65,7 @@ impl std::fmt::Display for Error {
             Error::ExpectedType {
                 expected, actual, ..
             } => {
-                write!(f, "expected this to have the type {expected:?}, but it actually has the type {actual:?}")
+                write!(f, "expected this to have the type {expected}, but it actually has the type {actual}")
             }
             Error::MatchBranchArgNumberMismatch {
                 number_of_args_in_branch,
@@ -85,7 +85,7 @@ impl std::fmt::Display for Error {
             Error::ExpectedFunctionType { actual_type, .. } => {
                 write!(
                     f,
-                    "expected to have a function type, but its actual type is {actual_type:?}"
+                    "expected to have a function type, but its actual type is {actual_type}"
                 )
             }
         }
@@ -324,8 +324,8 @@ impl Typechecker {
                         branch.constructor.clone(),
                     ));
                 }
-                Some((loc, ty)) => {
-                    self.assert_type_eq(&target_type, &ty, *loc)?;
+                Some((_, ty)) => {
+                    self.assert_type_eq(&target_type, &ty, branch.loc)?;
                     ty
                 }
             };
@@ -468,7 +468,13 @@ impl Typechecker {
                 self.check_type(f, loc)?;
                 self.check_type(x, loc)?;
             }
-            Type::Int => {}
+            Type::Int => {},
+            Type::App { head, args } => {
+                self.check_type(head, loc)?;
+                for arg in args {
+                    self.check_type(arg, loc)?;
+                }
+            }
         }
         Ok(())
     }

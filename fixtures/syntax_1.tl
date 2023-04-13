@@ -2,6 +2,8 @@
 
 type Bool { True, False }
 
+type BoolPair { MkPair Bool Bool }
+
 f : Int -> Int -> Int { x y -> + x y }
 
 g : Int -> Int -> Int { x y -> - (*  x y) x }
@@ -16,4 +18,10 @@ not : Bool -> Bool {
     True -> False, // comment at end of line
     False -> True
   }
+}
+
+type Unit { Unit }
+
+idunit : Unit -> Unit {
+  u -> Unit
 }
