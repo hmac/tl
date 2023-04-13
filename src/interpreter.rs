@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ast::{Expr, TypeConstructor, Pattern, Var, Operator, MatchBranch};
+use crate::ast::{Expr, TypeConstructor, Pattern, Var, Operator};
 use crate::local_variables::LocalVariables;
 
 pub struct Interpreter {
@@ -80,7 +80,7 @@ impl Interpreter {
                     self.eval(locals, body)
                 } else {
                     Ok(Value::Func {
-                        params: args.clone(),
+                        params: args.iter().map(|(_, name)| name).cloned().collect(),
                         applied_args: vec![],
                         // TODO: avoid cloning body
                         body: (**body).clone(),
@@ -96,9 +96,9 @@ impl Interpreter {
                     Value::Int(n) => {
                         // Find a branch that matches n
                         for branch in branches {
-                            match branch {
-                                MatchBranch::Int { int, rhs, .. } if *int == n => {
-                                    return self.eval(locals, &rhs);
+                            match branch.pattern {
+                                Pattern::Int { value, .. } if value == n => {
+                                    return self.eval(locals, &branch.rhs);
                                 }
                                 _ => {}
                             }
@@ -107,18 +107,18 @@ impl Interpreter {
                     },
                     Value::Constructor { name, applied_args } => {
                         // Find a branch that matches the constructor name
-                        match branches.iter().find(|branch| branch.has_constructor(&name) ) {
-                            Some(MatchBranch::Constructor { args, rhs, .. }) => {
-                                // Bind the branch args
-                                let new_locals = self.build_locals_from_func_args(args.clone(), applied_args);
-                                // Evaluate the rhs
-                                self.eval(&locals.extend(new_locals), &rhs)
-                            }
-                            Some(MatchBranch::Int { .. }) => unreachable!(),
-                            None => {
-                                Err(Error::NoMatchingBranch)
+                        for branch in branches {
+                            match &branch.pattern {
+                                Pattern::Constructor { name: n, args, .. } if *n == name => {
+                                    // Bind the branch args
+                                    let new_locals = self.build_locals_from_patterns(args.clone(), applied_args);
+                                    // Evaluate the rhs
+                                    return self.eval(&locals.extend(new_locals), &branch.rhs);
+                                }
+                                _ => {}
                             }
                         }
+                        Err(Error::NoMatchingBranch)
                     }
                     _ => Err(Error::InvalidMatchTarget)
                 }
@@ -152,14 +152,23 @@ impl Interpreter {
         }
     }
 
-    fn build_locals_from_func_args(&self, params: Vec<Pattern>, args: Vec<Value>) -> HashMap<String, Value> {
+    fn build_locals_from_func_args(&self, params: Vec<String>, args: Vec<Value>) -> HashMap<String, Value> {
+        let mut new_locals = HashMap::new();
+        for (param, arg) in params.into_iter().zip(args.into_iter()) {
+            new_locals.insert(param.to_string(), arg);
+        }
+        new_locals
+    }
+
+    fn build_locals_from_patterns(&self, params: Vec<Pattern>, args: Vec<Value>) -> HashMap<String, Value> {
         let mut new_locals = HashMap::new();
         for (param, arg) in params.into_iter().zip(args.into_iter()) {
             match param {
-                Pattern::Var(_, p) => {
-                    new_locals.insert(p.to_string(), arg);
-                }
-                Pattern::Int(_, _) => {}
+                Pattern::Var { name, ..} => {
+                    new_locals.insert(name.clone(), arg);
+                },
+                Pattern::Constructor { .. } => todo!(),
+                Pattern::Int { .. } => {},
             }
         }
         new_locals
@@ -198,7 +207,7 @@ fn eval_operator(op: Operator, args: Vec<Value>) -> Value {
 pub enum Value {
     Int(i64),
     Func {
-        params: Vec<Pattern>,
+        params: Vec<String>,
         applied_args: Vec<Value>,
         body: Expr,
     },

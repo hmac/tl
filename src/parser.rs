@@ -357,7 +357,7 @@ impl Parser {
                         for e in exprs {
                             match e {
                                 Expr::Var(loc, Var::Local(n)) => {
-                                    args.push(Pattern::Var(loc, n));
+                                    args.push((loc, n));
                                 }
                                 _ => {
                                     return Err(Error::ExpectedPattern(loc));
@@ -493,45 +493,54 @@ impl Parser {
     }
 
     fn parse_match_branch(&mut self) -> Result<MatchBranch, Error> {
+        let loc = self.loc;
+        let pattern = self.parse_pattern()?;
+        self.trim();
+        self.eat("->")?;
+        self.trim();
+        let rhs = self.parse_expr()?;
+        Ok(MatchBranch { loc, pattern, rhs })
+    }
+
+    fn parse_pattern(&mut self) -> Result<Pattern, Error> {
+        // TODO: nested patterns in parens
         if self.input().starts_with(numeric_char) {
-            // Int branch
-            let (loc, int) = self.parse_int()?;
+            let (loc, value) = self.parse_int()?;
             self.trim();
-            self.eat("->")?;
-            self.trim();
-            let rhs = self.parse_expr()?;
-            Ok(MatchBranch::Int { loc, int, rhs })
+            Ok(Pattern::Int { loc, value })
         } else {
-            // Constructor branch
             let loc = self.loc;
-            let constructor = self.parse_upper_ident()?;
+            let name = self.parse_upper_ident()?;
             self.trim();
             let mut args = vec![];
             loop {
                 if self.input().starts_with("->") {
                     break;
                 }
-                let pat = if self.input().starts_with(numeric_char) {
-                    let (loc, n) = self.parse_int()?;
-                    Pattern::Int(loc, n)
-                } else {
-                    let loc = self.loc;
-                    let var = self.parse_lower_ident()?;
-                    Pattern::Var(loc, var)
-                };
-                args.push(pat);
+                let pattern = self.parse_pattern_nested()?;
+                args.push(pattern);
                 self.trim();
             }
-            self.eat("->")?;
-            self.trim();
-            let rhs = self.parse_expr()?;
-            Ok(MatchBranch::Constructor {
-                loc,
-                constructor,
-                args,
-                rhs,
-            })
+            Ok(Pattern::Constructor { loc, name, args })
         }
+    }
+
+    fn parse_pattern_nested(&mut self) -> Result<Pattern, Error> {
+        if self.input().starts_with(numeric_char) {
+            let (loc, value) = self.parse_int()?;
+            self.trim();
+            return Ok(Pattern::Int { loc, value });
+        }
+        if self.input().starts_with(upper_ident_char) {
+            let loc = self.loc;
+            let name = self.parse_upper_ident()?;
+            self.trim();
+            return Ok(Pattern::Constructor { loc, name, args: vec![] });
+        }
+
+        let loc = self.loc;
+        let name = self.parse_lower_ident()?;
+        return Ok(Pattern::Var { loc, name });
     }
 
     fn parse_int(&mut self) -> Result<(Loc, i64), Error> {

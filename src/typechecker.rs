@@ -218,16 +218,10 @@ impl Typechecker {
                 let mut new_locals = HashMap::new();
 
                 // Add each arg to local variables
-                for arg in args {
+                for (_, arg) in args {
                     match func_arg_types.next() {
                         Some(arg_type) => {
-                            self.check_pattern(arg, arg_type)?;
-                            match arg {
-                                Pattern::Var(_, v) => {
-                                    new_locals.insert(v.to_string(), arg_type.clone());
-                                }
-                                Pattern::Int(_, _) => {}
-                            }
+                            new_locals.insert(arg.clone(), arg_type.clone());
                         }
                         None => {
                             todo!("what error?");
@@ -359,11 +353,6 @@ impl Typechecker {
         }
     }
 
-    fn check_pattern(&self, _pattern: &Pattern, _expected_type: &Type) -> Result<(), Error> {
-        // Patterns are currently just variables, so are always OK
-        Ok(())
-    }
-
     fn check_match_expr(
         &self,
         local_variables: &LocalVariables<Type>,
@@ -373,16 +362,17 @@ impl Typechecker {
     ) -> Result<(), Error> {
         // For each branch...
         for branch in branches {
-            match branch {
-                MatchBranch::Int { loc, rhs, .. } => {
+            match &branch.pattern {
+                Pattern::Int { loc, .. } => {
                     self.assert_type_eq(target_type, &TYPE_INT, *loc)?;
-                    self.check_expr(&local_variables, &rhs, result_type)?;
+                    self.check_expr(&local_variables, &branch.rhs, result_type)?;
                 },
-                MatchBranch::Constructor { loc, constructor, args, rhs, .. } => {
+                Pattern::Var { .. } => todo!(),
+                Pattern::Constructor { loc, name, args, .. } => {
                     // Check the constructor yields `target_type`
-                    let ctor_ty = match self.constructors.get(constructor) {
+                    let ctor_ty = match self.constructors.get(name) {
                         None => {
-                            return Err(Error::UnknownConstructor(*loc, constructor.clone()));
+                            return Err(Error::UnknownConstructor(*loc, name.to_string()));
                         }
                         Some((_, ty)) => {
                             // func_args always returns a non-empty vector, so this unwrap is safe
@@ -407,16 +397,17 @@ impl Typechecker {
                     let mut new_vars = HashMap::new();
                     for (pattern, ty) in args.iter().zip(ctor_ty_args.into_iter()) {
                         match pattern {
-                            Pattern::Var(_, n) => {
-                                new_vars.insert(n.to_string(), ty.clone());
+                            Pattern::Var { name, .. } => {
+                                new_vars.insert(name.to_string(), ty.clone());
                             },
-                            Pattern::Int(_, _) => {}
+                            Pattern::Int { .. } => {}
+                            Pattern::Constructor { .. } => todo!(),
                         }
                     }
                     let local_variables = local_variables.extend(new_vars);
 
                     // Check the branch rhs has result_type
-                    self.check_expr(&local_variables, &rhs, result_type)?;
+                    self.check_expr(&local_variables, &branch.rhs, result_type)?;
                 }
             }
         }
@@ -451,17 +442,18 @@ impl Typechecker {
         target_type: &Type,
         branch: &MatchBranch,
     ) -> Result<Type, Error> {
-        match branch {
-            MatchBranch::Int { rhs, .. } => {
-                self.infer_expr(&local_variables, &rhs)
+        match &branch.pattern {
+            Pattern::Int { .. } => {
+                self.infer_expr(&local_variables, &branch.rhs)
             },
-            MatchBranch::Constructor { constructor, args, rhs, .. } => {
+            Pattern::Var { .. } => todo!(),
+            Pattern::Constructor { name, args, .. } => {
                 // Lookup the type of the constructor and check it matches the target type.
-                let ctor_ty = match self.constructors.get(constructor) {
+                let ctor_ty = match self.constructors.get(name) {
                     None => {
                         return Err(Error::UnknownConstructor(
                             branch.loc(),
-                            constructor.clone(),
+                            name.to_string(),
                         ));
                     }
                     Some((loc, ty)) => {
@@ -485,16 +477,17 @@ impl Typechecker {
                 let mut new_vars = HashMap::new();
                 for (pattern, ty) in args.iter().zip(ctor_ty_args.into_iter()) {
                     match pattern {
-                        Pattern::Var(_, n) => {
-                            new_vars.insert(n.to_string(), ty.clone());
+                        Pattern::Var { name, .. } => {
+                            new_vars.insert(name.to_string(), ty.clone());
                         },
-                        Pattern::Int(_, _) => {}
+                        Pattern::Int { .. } => {},
+                        Pattern::Constructor { .. } => todo!(),
                     }
                 }
                 let local_variables = local_variables.extend(new_vars);
 
                 // Infer the rhs
-                self.infer_expr(&local_variables, &rhs)
+                self.infer_expr(&local_variables, &branch.rhs)
             }
         }
     }

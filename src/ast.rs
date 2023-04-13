@@ -218,7 +218,7 @@ pub enum Expr {
     },
     Func {
         loc: Loc,
-        args: Vec<Pattern>,
+        args: Vec<(Loc, String)>,
         body: Box<Expr>,
     },
     App {
@@ -241,51 +241,38 @@ impl HasLoc for Expr {
 }
 
 #[derive(Debug, Clone)]
-// TODO: consider merging, so that int branches are just
-// constructor branches with no args and a special "int" constructor.
-pub enum MatchBranch {
-    Constructor {
-        loc: Loc,
-        constructor: String,
-        args: Vec<Pattern>,
-        rhs: Expr,
-    },
-    Int {
-        loc: Loc,
-        int: i64,
-        rhs: Expr,
-    }
+pub struct MatchBranch {
+    pub loc: Loc,
+    pub pattern: Pattern,
+    pub rhs: Expr,
 }
 
 impl HasLoc for MatchBranch {
     fn loc(&self) -> Loc {
-        match self {
-            Self::Constructor { loc, .. } => *loc,
-            Self::Int { loc, .. } => *loc,
-        }
-    }
-}
-
-impl MatchBranch {
-    pub fn has_constructor(&self, name: &str) -> bool {
-        match self {
-            Self::Constructor { constructor, .. } => constructor == name,
-            _ => false
-        }
+        self.loc
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    Var(Loc, String),
-    Int(Loc, i64)
+    Constructor { loc: Loc, name: String, args: Vec<Pattern> },
+    Var { loc: Loc, name: String },
+    Int { loc: Loc, value: i64 },
 }
 
 impl std::fmt::Display for Pattern {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
-            Pattern::Var(_, n) => write!(f, "{}", n),
-            Pattern::Int(_, n) => write!(f, "{}", n)
+            Pattern::Constructor { name, args, .. } => {
+                write!(f, "{}", name)?;
+                // TODO: nested patterns need parens
+                for arg in args {
+                    write!(f, " {}", arg)?;
+                }
+                Ok(())
+            },
+            Pattern::Int { value, .. } => write!(f, "{}", value),
+            Pattern::Var { name, .. } => write!(f, "{}", name)
         }
     }
 }
@@ -293,8 +280,9 @@ impl std::fmt::Display for Pattern {
 impl HasLoc for Pattern {
     fn loc(&self) -> Loc {
         match self {
-            Self::Var(loc, _) => *loc,
-            Self::Int(loc, _) => *loc
+            Self::Var { loc, .. } => *loc,
+            Self::Int { loc, .. } => *loc,
+            Self::Constructor { loc, .. } => *loc
         }
     }
 }
