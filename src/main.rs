@@ -16,9 +16,11 @@ fn main() {
                         constructors,
                         loc,
                     } => {
-                        typechecker
-                            .register_type(&name, &constructors, *loc)
-                            .unwrap();
+                        if let Err(error) = typechecker.register_type(&name, &constructors, *loc) {
+                            println!("Error:\n");
+                            ast::print_error(&parser.into_input(), error);
+                            return;
+                        }
                     }
                     ast::Decl::Func {
                         name, r#type, loc, ..

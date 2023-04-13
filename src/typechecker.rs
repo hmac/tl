@@ -26,6 +26,7 @@ pub enum Error {
         loc: Loc,
         actual_type: Type,
     },
+    DuplicateConstructor { existing: (Loc, Type), duplicate: TypeConstructor },
 }
 
 impl HasLoc for Error {
@@ -40,6 +41,7 @@ impl HasLoc for Error {
             Error::MatchBranchArgNumberMismatch { loc, .. } => *loc,
             Error::CannotInferTypeOfFunctions(loc) => *loc,
             Error::ExpectedFunctionType { loc, .. } => *loc,
+            Error::DuplicateConstructor { duplicate, .. } => duplicate.loc,
         }
     }
 }
@@ -88,6 +90,12 @@ impl std::fmt::Display for Error {
                     "expected to have a function type, but its actual type is {actual_type}"
                 )
             }
+            Error::DuplicateConstructor { .. } => {
+                write!(
+                    f,
+                    "this constructor conflicts with an existing constructor of the same name - constructor names must be globally unique",
+                )
+            }
         }
     }
 }
@@ -124,8 +132,15 @@ impl Typechecker {
             let ctor_type = make_constructor_type(&name, &ctor);
             // Note: we don't check the type now.
             // That happens later, see `check_all_types`.
-            self.constructors
-                .insert(ctor.name.to_string(), (ctor.loc(), ctor_type));
+            match self.constructors.get(&ctor.name.to_string()) {
+                None => {
+                    self.constructors
+                        .insert(ctor.name.to_string(), (ctor.loc(), ctor_type));
+                }
+                Some(existing_ctor) => {
+                    return Err(Error::DuplicateConstructor { existing: existing_ctor.clone(), duplicate: ctor.clone() })
+                }
+            }
         }
         Ok(())
     }

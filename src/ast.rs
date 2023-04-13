@@ -36,13 +36,23 @@ fn string_index_to_line_col_number(
         }
     }
 
-    let line = line.unwrap_or(0);
+    let mut line = line.unwrap_or(0);
     let line_index = line_index.unwrap_or(0);
 
     // the column position in the line
-    let col = string_index - line_index;
+    let col = if line == 0 {
+        string_index - line_index + 1
+    } else {
+        string_index - line_index
+    };
 
-    (line + 2, col)
+    if line == 0 {
+        line = 1;
+    } else {
+        line += 2;
+    }
+
+    (line, col)
 }
 
 // Print the line before the error location,
@@ -60,15 +70,13 @@ pub fn print_error<E: std::fmt::Display + HasLoc>(orig: &str, error: E) {
     let newlines = calculate_lines(orig);
     let (line, col) = string_index_to_line_col_number(loc, &newlines);
     let mut source_lines = orig.split('\n');
+
     // Print the previous line, if it exists
-    match source_lines.nth(line - 2) {
-        Some(l) => {
-            println!("{:>4}: {}", line - 1, l);
-            println!("{:>4}: {}", line, source_lines.next().unwrap());
-        }
-        None => {
-            println!("{:>4}: {}", line, source_lines.nth(line - 1).unwrap());
-        }
+    if line > 1 {
+        println!("{:>4}: {}", line - 1, source_lines.nth(line - 2).unwrap());
+        println!("{:>4}: {}", line, source_lines.next().unwrap());
+    } else {
+        println!("{:>4}: {}", line, source_lines.nth(line - 1).unwrap());
     }
     println!("      {}^", " ".repeat(col-1));
     println!("      {} {}", " ".repeat(col-1), error.to_string());
@@ -103,7 +111,7 @@ impl HasLoc for Decl {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeConstructor {
     pub loc: Loc,
     pub name: String,
