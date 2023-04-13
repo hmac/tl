@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ast::*;
 
@@ -27,6 +27,8 @@ pub enum Error {
         actual_type: Type,
     },
     DuplicateConstructor { existing: (Loc, Type), duplicate: TypeConstructor },
+    CannotApplyNonFunction { loc: Loc, actual_type: Type },
+    TooManyArgumentsInApplication { loc: Loc, max_number_of_arguments: usize, actual_number_of_arguments: usize },
 }
 
 impl HasLoc for Error {
@@ -42,6 +44,8 @@ impl HasLoc for Error {
             Error::CannotInferTypeOfFunctions(loc) => *loc,
             Error::ExpectedFunctionType { loc, .. } => *loc,
             Error::DuplicateConstructor { duplicate, .. } => duplicate.loc,
+            Error::CannotApplyNonFunction { loc, .. } => *loc,
+            Error::TooManyArgumentsInApplication { loc, .. } => *loc,
         }
     }
 }
@@ -94,6 +98,19 @@ impl std::fmt::Display for Error {
                 write!(
                     f,
                     "this constructor conflicts with an existing constructor of the same name - constructor names must be globally unique",
+                )
+            }
+            Error::CannotApplyNonFunction { actual_type, .. } => {
+                write!(
+                    f,
+                    "this expression cannot be applied as a function, because it has type {actual_type}",
+                )
+            }
+            Error::TooManyArgumentsInApplication { max_number_of_arguments, actual_number_of_arguments, .. } => {
+                write!(
+                    f,
+                    "this function takes {max_number_of_arguments} {}, but is given {actual_number_of_arguments}",
+                    if *max_number_of_arguments > 1 { "arguments" } else { "argument" }
                 )
             }
         }
@@ -230,22 +247,42 @@ impl Typechecker {
                 // Infer type of head
                 let head_type = self.infer_expr(local_variables, head)?;
 
-                // Deconstruct type
-                let mut head_type_args = head_type.func_args().into_iter();
+                // Check that head is a function type
+                match head_type {
+                    Type::Func(_, _) => {},
+                    _ => {
+                        return Err(Error::CannotApplyNonFunction { loc: *loc, actual_type: head_type });
+                    }
+                }
+
+                // Split type into args and result
+                let mut head_type_args = head_type.func_args();
+                // Because we know head_type is a function type, this pop_back is safe
+                let head_type_result = head_type_args.pop_back().unwrap();
+                let mut head_type_args = head_type_args.into_iter();
+
+                // Check if we are given too many arguments
+                if head_type_args.len() < args.len() {
+                    return Err(Error::TooManyArgumentsInApplication {
+                        max_number_of_arguments: head_type_args.len(),
+                        actual_number_of_arguments: args.len(),
+                        loc: expr.loc()
+                    });
+                }
 
                 for arg in args {
                     match head_type_args.next() {
                         Some(ty) => {
                             self.check_expr(local_variables, arg, ty)?;
                         }
-                        None => {
-                            todo!("what error to return here?");
-                        }
+                        None => unreachable!()
                     }
                 }
 
                 // Reconstruct result type
-                let result_type = Type::from_func_args(&head_type_args.collect());
+                let mut head_type_args: VecDeque<_> = head_type_args.collect();
+                head_type_args.push_back(head_type_result);
+                let result_type = Type::from_func_args(&Vec::from(head_type_args));
                 self.assert_type_eq(expected_type, &result_type, *loc)?;
                 Ok(())
             }
@@ -340,7 +377,9 @@ impl Typechecker {
                     ));
                 }
                 Some((_, ty)) => {
-                    self.assert_type_eq(&target_type, &ty, branch.loc)?;
+                    // func_args always returns a non-empty vector, so this unwrap is safe
+                    let ctor_result_type = *ty.func_args().back().unwrap();
+                    self.assert_type_eq(&target_type, &ctor_result_type, branch.loc)?;
                     ty
                 }
             };

@@ -25,3 +25,19 @@ type Unit { Unit }
 idunit : Unit -> Unit {
   u -> Unit
 }
+
+andpair : BoolPair -> Bool {
+  p -> match p {
+    MkPair a b -> and a b
+  }
+}
+
+and : Bool -> Bool -> Bool {
+  a b -> match a {
+    True -> match b {
+      True -> True,
+      False -> False
+    },
+    False -> False
+  }
+}

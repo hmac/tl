@@ -78,8 +78,8 @@ pub fn print_error<E: std::fmt::Display + HasLoc>(orig: &str, error: E) {
     } else {
         println!("{:>4}: {}", line, source_lines.nth(line - 1).unwrap());
     }
-    println!("      {}^", " ".repeat(col-1));
-    println!("      {} {}", " ".repeat(col-1), error.to_string());
+    println!("     {}^", " ".repeat(col));
+    println!("     {} {}", " ".repeat(col), error.to_string());
 }
 
 /// A trait for types that have a source location.

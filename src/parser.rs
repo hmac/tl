@@ -184,6 +184,7 @@ impl Parser {
                 self.eat("{")?;
                 self.trim();
                 let body = self.parse_expr()?;
+                self.trim();
                 self.eat("}")?;
                 self.trim();
                 Ok(Decl::Func {
@@ -244,15 +245,16 @@ impl Parser {
         &self,
         mut components: Vec<(Loc, TypeComponent)>,
     ) -> Result<SourceType, Error> {
-        if components.len() == 1 {
-            let (loc, c) = components.pop().unwrap();
-            return self.make_type_from_single_component(loc, c);
-        }
+        components.reverse();
 
         let ty = {
             let (loc, c) = components.pop().unwrap();
             self.make_type_from_single_component(loc, c)?
         };
+
+        if components.is_empty() {
+            return Ok(ty);
+        }
 
         match components.pop() {
             Some((loc, c)) => match c {
