@@ -48,8 +48,6 @@ pub fn run<W:Write>(input: String, output: &mut W) -> std::io::Result<()> {
                 }
             }
 
-            writeln!(output, "Typecheck successful.")?;
-
             let mut interpreter = interpreter::Interpreter::new();
 
             for decl in &ast {
@@ -65,8 +63,14 @@ pub fn run<W:Write>(input: String, output: &mut W) -> std::io::Result<()> {
                 match decl {
                     ast::Decl::Func { name, body, .. } if name == "main" => {
                         let locals = local_variables::LocalVariables::new();
-                        let result = interpreter.eval(&locals, &body).unwrap();
-                        writeln!(output, "Result: {:?}", result)?;
+                        match interpreter.eval(&locals, &body) {
+                            Err(error) => {
+                                writeln!(output, "Error: {:?}\n", error)?;
+                            }
+                            Ok(result) => {
+                                writeln!(output, "{}", result)?;
+                            }
+                        }
                     }
                     _ => {}
                 }

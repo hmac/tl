@@ -1,8 +1,11 @@
 #[cfg(test)]
 
 #[test]
-fn type_errors() {
-    for entry in std::fs::read_dir("fixtures/type_errors").unwrap() {
+fn fixtures() {
+    let type_error_fixtures = std::fs::read_dir("fixtures/type_errors").unwrap();
+    let interpreter_fixtures = std::fs::read_dir("fixtures/interpreter").unwrap();
+
+    for entry in type_error_fixtures.chain(interpreter_fixtures) {
         let entry = entry.unwrap();
         let path = entry.path();
         println!("Analyzing {}", path.display());

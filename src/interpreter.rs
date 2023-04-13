@@ -194,7 +194,23 @@ pub enum Value {
         name: String,
         applied_args: Vec<Value>
     }
-    // TODO
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Value::Int(n) => write!(f, "{}", n),
+            Value::Func { .. } => write!(f, "<func>"),
+            Value::Operator { .. } => write!(f, "<func>"),
+            Value::Constructor { name, applied_args } => {
+                write!(f, "{}", name)?;
+                for arg in applied_args {
+                    write!(f, " {}", arg)?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
