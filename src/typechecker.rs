@@ -548,6 +548,9 @@ fn make_constructor_type(type_name: &str, constructor: &TypeConstructor) -> Type
     ty
 }
 
+/// A linked list of local variable maps.
+/// This makes it easy to add new variables for typechecking a specific subexpression,
+/// without affecting the variables in scope for the parent call.
 enum LocalVariables<'a> {
     One(HashMap<String, Type>),
     More(HashMap<String, Type>, &'a LocalVariables<'a>),
