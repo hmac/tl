@@ -504,25 +504,36 @@ impl Parser {
 
     fn parse_pattern(&mut self) -> Result<Pattern, Error> {
         // TODO: nested patterns in parens
+        // TODO: var patterns
         if self.input().starts_with(numeric_char) {
             let (loc, value) = self.parse_int()?;
             self.trim();
-            Ok(Pattern::Int { loc, value })
-        } else {
-            let loc = self.loc;
-            let name = self.parse_upper_ident()?;
-            self.trim();
-            let mut args = vec![];
-            loop {
-                if self.input().starts_with("->") {
-                    break;
-                }
-                let pattern = self.parse_pattern_nested()?;
-                args.push(pattern);
-                self.trim();
-            }
-            Ok(Pattern::Constructor { loc, name, args })
+            return Ok(Pattern::Int { loc, value });
         }
+
+        if self.input().starts_with(lower_ident_char) {
+            let loc = self.loc;
+            let name = self.parse_lower_ident()?;
+            if name == "_" {
+                return Ok(Pattern::Wildcard { loc }) }
+            else {
+                return Ok(Pattern::Var { loc, name });
+            }
+        }
+
+        let loc = self.loc;
+        let name = self.parse_upper_ident()?;
+        self.trim();
+        let mut args = vec![];
+        loop {
+            if self.input().starts_with("->") {
+                break;
+            }
+            let pattern = self.parse_pattern_nested()?;
+            args.push(pattern);
+            self.trim();
+        }
+        Ok(Pattern::Constructor { loc, name, args })
     }
 
     fn parse_pattern_nested(&mut self) -> Result<Pattern, Error> {
@@ -540,7 +551,11 @@ impl Parser {
 
         let loc = self.loc;
         let name = self.parse_lower_ident()?;
-        return Ok(Pattern::Var { loc, name });
+        if name == "_" {
+            return Ok(Pattern::Wildcard { loc }) }
+        else {
+            return Ok(Pattern::Var { loc, name });
+        }
     }
 
     fn parse_int(&mut self) -> Result<(Loc, i64), Error> {

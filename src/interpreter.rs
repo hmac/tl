@@ -99,6 +99,9 @@ impl Interpreter {
                             match branch.pattern {
                                 Pattern::Int { value, .. } if value == n => {
                                     return self.eval(locals, &branch.rhs);
+                                },
+                                Pattern::Wildcard { .. } => {
+                                    return self.eval(locals, &branch.rhs);
                                 }
                                 _ => {}
                             }
@@ -114,6 +117,9 @@ impl Interpreter {
                                     let new_locals = self.build_locals_from_patterns(args.clone(), applied_args);
                                     // Evaluate the rhs
                                     return self.eval(&locals.extend(new_locals), &branch.rhs);
+                                }
+                                Pattern::Wildcard { .. } => {
+                                    return self.eval(locals, &branch.rhs);
                                 }
                                 _ => {}
                             }
@@ -169,6 +175,7 @@ impl Interpreter {
                 },
                 Pattern::Constructor { .. } => todo!(),
                 Pattern::Int { .. } => {},
+                Pattern::Wildcard { .. } => {}
             }
         }
         new_locals

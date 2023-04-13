@@ -258,6 +258,7 @@ pub enum Pattern {
     Constructor { loc: Loc, name: String, args: Vec<Pattern> },
     Var { loc: Loc, name: String },
     Int { loc: Loc, value: i64 },
+    Wildcard { loc: Loc }
 }
 
 impl std::fmt::Display for Pattern {
@@ -272,7 +273,8 @@ impl std::fmt::Display for Pattern {
                 Ok(())
             },
             Pattern::Int { value, .. } => write!(f, "{}", value),
-            Pattern::Var { name, .. } => write!(f, "{}", name)
+            Pattern::Var { name, .. } => write!(f, "{}", name),
+            Pattern::Wildcard { .. } => write!(f, "_")
         }
     }
 }
@@ -282,7 +284,8 @@ impl HasLoc for Pattern {
         match self {
             Self::Var { loc, .. } => *loc,
             Self::Int { loc, .. } => *loc,
-            Self::Constructor { loc, .. } => *loc
+            Self::Constructor { loc, .. } => *loc,
+            Self::Wildcard { loc, .. } => *loc
         }
     }
 }

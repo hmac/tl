@@ -368,6 +368,9 @@ impl Typechecker {
                     self.check_expr(&local_variables, &branch.rhs, result_type)?;
                 },
                 Pattern::Var { .. } => todo!(),
+                Pattern::Wildcard { .. } => {
+                    self.check_expr(&local_variables, &branch.rhs, result_type)?;
+                },
                 Pattern::Constructor { loc, name, args, .. } => {
                     // Check the constructor yields `target_type`
                     let ctor_ty = match self.constructors.get(name) {
@@ -401,6 +404,7 @@ impl Typechecker {
                                 new_vars.insert(name.to_string(), ty.clone());
                             },
                             Pattern::Int { .. } => {}
+                            Pattern::Wildcard { .. } => {},
                             Pattern::Constructor { .. } => todo!(),
                         }
                     }
@@ -443,7 +447,7 @@ impl Typechecker {
         branch: &MatchBranch,
     ) -> Result<Type, Error> {
         match &branch.pattern {
-            Pattern::Int { .. } => {
+            Pattern::Int { .. } | Pattern::Wildcard { .. } => {
                 self.infer_expr(&local_variables, &branch.rhs)
             },
             Pattern::Var { .. } => todo!(),
@@ -480,7 +484,7 @@ impl Typechecker {
                         Pattern::Var { name, .. } => {
                             new_vars.insert(name.to_string(), ty.clone());
                         },
-                        Pattern::Int { .. } => {},
+                        Pattern::Int { .. } | Pattern::Wildcard { .. } => {},
                         Pattern::Constructor { .. } => todo!(),
                     }
                 }
