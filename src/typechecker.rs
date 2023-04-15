@@ -232,8 +232,6 @@ impl Typechecker {
                 // Reconstruct remaining args into result type
                 let result_type = Type::from_func_args(&func_arg_types.collect());
 
-                // TODO: use new locals when checking body
-
                 self.check_expr(
                     &local_variables.extend(new_locals),
                     body,
@@ -412,15 +410,6 @@ impl Typechecker {
                 for (pattern, ty) in args.iter().zip(ctor_ty_args.into_iter()) {
                     let vars = self.check_match_branch_pattern(&pattern, &ty)?;
                     new_vars.extend(vars);
-                    // match pattern {
-                    //     Pattern::Var { name, .. } => {
-                    //         new_vars.insert(name.to_string(), ty.clone());
-                    //     },
-                    //     Pattern::Int { .. } => {}
-                    //     Pattern::Wildcard { .. } => {},
-                    //     Pattern::Constructor { .. } => {
-                    //     },
-                    // }
                 }
             },
         }
