@@ -10,11 +10,21 @@ fn fixtures() {
         let path = entry.path();
         println!("Analyzing {}", path.display());
 
-        let file_contents = std::fs::read_to_string(path).unwrap();
+        let file_contents = std::fs::read_to_string(&path).unwrap();
         let (input, expected_output) = file_contents.split_once("\n---\n").unwrap();
 
         let mut output_writer = vec![];
-        tl::run(input.to_string(), &mut output_writer).unwrap();
+
+        let result = {
+            let runner = tl::Runner::new(&path, input.to_string(), &mut output_writer);
+            runner.and_then(|mut r| r.run("main"))
+        };
+
+        if let Ok(result) = result {
+            use std::io::Write;
+
+            write!(&mut output_writer, "{}", result).unwrap();
+        }
 
         let actual_output = String::from_utf8(output_writer).unwrap();
 

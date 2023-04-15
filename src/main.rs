@@ -1,7 +1,20 @@
-fn main() {
-    let input_file = std::env::args().nth(1).unwrap();
-    let input = std::fs::read_to_string(input_file).unwrap();
+use std::path::PathBuf;
 
-    let mut stdout = std::io::stdout();
-    tl::run(input.to_string(), &mut stdout).unwrap();
+const USAGE: &'static str = "
+Usage:
+  tl <PATH> <FUNC>
+
+  Example:
+
+    tl foo/bar.tl my_func
+";
+
+fn main() {
+    let input_file = std::env::args().nth(1).expect(USAGE);
+    let function = std::env::args().nth(2).expect(USAGE);
+    let stdout = std::io::stdout();
+
+    let mut runner = tl::Runner::from_path(&PathBuf::from(input_file), stdout).unwrap();
+
+    runner.run(&function).unwrap();
 }
