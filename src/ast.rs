@@ -213,7 +213,7 @@ pub enum Expr {
     Int(Loc, i64),
     Match {
         loc: Loc,
-        target: Var,
+        target: Box<Expr>,
         branches: Vec<MatchBranch>,
     },
     Func {

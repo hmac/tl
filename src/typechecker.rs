@@ -200,7 +200,7 @@ impl Typechecker {
                 ..
             } => {
                 // Infer the type of the target
-                let target_type = self.infer_var(local_variables, target, *loc)?;
+                let target_type = self.infer_expr(local_variables, target)?;
 
                 // There must be at least one branch
                 if branches.is_empty() {
@@ -299,7 +299,7 @@ impl Typechecker {
                 ..
             } => {
                 // Infer the type of the target
-                let target_type = self.infer_var(local_variables, target, *loc)?;
+                let target_type = self.infer_expr(local_variables, target)?;
 
                 // There must be at least one branch
                 if branches.is_empty() {
@@ -362,61 +362,69 @@ impl Typechecker {
     ) -> Result<(), Error> {
         // For each branch...
         for branch in branches {
-            match &branch.pattern {
-                Pattern::Int { loc, .. } => {
-                    self.assert_type_eq(target_type, &TYPE_INT, *loc)?;
-                    self.check_expr(&local_variables, &branch.rhs, result_type)?;
-                },
-                Pattern::Var { .. } => todo!(),
-                Pattern::Wildcard { .. } => {
-                    self.check_expr(&local_variables, &branch.rhs, result_type)?;
-                },
-                Pattern::Constructor { loc, name, args, .. } => {
-                    // Check the constructor yields `target_type`
-                    let ctor_ty = match self.constructors.get(name) {
-                        None => {
-                            return Err(Error::UnknownConstructor(*loc, name.to_string()));
-                        }
-                        Some((_, ty)) => {
-                            // func_args always returns a non-empty vector, so this unwrap is safe
-                            let ctor_result_type = *ty.func_args().back().unwrap();
-                            self.assert_type_eq(&target_type, &ctor_result_type, *loc)?;
-                            ty
-                        }
-                    };
-
-                    // Check the constructor has the right number of args
-                    let ctor_ty_args = ctor_ty.func_args();
-                    let num_args_in_ctor_type = ctor_ty_args.len() - 1; // last elem is the result type
-                    if num_args_in_ctor_type != args.len() {
-                        return Err(Error::MatchBranchArgNumberMismatch {
-                            loc: branch.loc(),
-                            number_of_args_in_branch: args.len(),
-                            number_of_args_in_constructor_type: num_args_in_ctor_type,
-                        });
-                    }
-
-                    // Add each pattern to the set of local variables
-                    let mut new_vars = HashMap::new();
-                    for (pattern, ty) in args.iter().zip(ctor_ty_args.into_iter()) {
-                        match pattern {
-                            Pattern::Var { name, .. } => {
-                                new_vars.insert(name.to_string(), ty.clone());
-                            },
-                            Pattern::Int { .. } => {}
-                            Pattern::Wildcard { .. } => {},
-                            Pattern::Constructor { .. } => todo!(),
-                        }
-                    }
-                    let local_variables = local_variables.extend(new_vars);
-
-                    // Check the branch rhs has result_type
-                    self.check_expr(&local_variables, &branch.rhs, result_type)?;
-                }
-            }
+            let new_vars = self.check_match_branch_pattern(&branch.pattern, target_type)?;
+            let local_variables = local_variables.extend(new_vars);
+            self.check_expr(&local_variables, &branch.rhs, result_type)?;
         }
 
         Ok(())
+    }
+    
+    /// Check that `pattern` has type `expected_type` and return a map of variables bound by the
+    /// pattern.
+    fn check_match_branch_pattern(&self, pattern: &Pattern, expected_type: &Type) -> Result<HashMap<String, Type>, Error> {
+        let mut new_vars = HashMap::new();
+        match pattern {
+            Pattern::Var { name, .. } => {
+                new_vars.insert(name.to_string(), (*expected_type).clone());
+            },
+            Pattern::Int { loc, .. } => {
+                self.assert_type_eq(expected_type, &TYPE_INT, *loc)?;
+            }
+            Pattern::Wildcard { .. } => {},
+            Pattern::Constructor { name, args, loc, .. } => {
+                // Check the constructor result type matches `expected_type`
+                let ctor_ty = match self.constructors.get(name) {
+                    None => {
+                        return Err(Error::UnknownConstructor(*loc, name.to_string()));
+                    }
+                    Some((_, ty)) => {
+                        // func_args always returns a non-empty vector, so this unwrap is safe
+                        let ctor_result_type = *ty.func_args().back().unwrap();
+                        self.assert_type_eq(expected_type, &ctor_result_type, *loc)?;
+                        ty
+                    }
+                };
+
+                // Check the constructor has the right number of args
+                let ctor_ty_args = ctor_ty.func_args();
+                let num_args_in_ctor_type = ctor_ty_args.len() - 1; // last elem is the result type
+                if num_args_in_ctor_type != args.len() {
+                    // TODO: rename to MatchBranchPatternArgNumberMismatch
+                    return Err(Error::MatchBranchArgNumberMismatch {
+                        loc: *loc,
+                        number_of_args_in_branch: args.len(),
+                        number_of_args_in_constructor_type: num_args_in_ctor_type,
+                    });
+                }
+
+                // Add each pattern to the set of local variables
+                for (pattern, ty) in args.iter().zip(ctor_ty_args.into_iter()) {
+                    let vars = self.check_match_branch_pattern(&pattern, &ty)?;
+                    new_vars.extend(vars);
+                    // match pattern {
+                    //     Pattern::Var { name, .. } => {
+                    //         new_vars.insert(name.to_string(), ty.clone());
+                    //     },
+                    //     Pattern::Int { .. } => {}
+                    //     Pattern::Wildcard { .. } => {},
+                    //     Pattern::Constructor { .. } => {
+                    //     },
+                    // }
+                }
+            },
+        }
+        Ok(new_vars)
     }
 
     fn infer_var(

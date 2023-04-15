@@ -89,7 +89,7 @@ impl Interpreter {
             }
             Expr::Match { target, branches, .. } => {
                 // Evaluate the target
-                let target_value = self.eval_var(locals, target)?;
+                let target_value = self.eval(locals, target)?;
 
                 // Check its constructor.
                 match target_value {

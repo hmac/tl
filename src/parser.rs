@@ -237,7 +237,11 @@ impl Parser {
         } else {
             let loc = self.loc;
             let type_name = self.parse_upper_ident()?;
-            Ok(SourceType::Named(loc, type_name))
+            if type_name == "Int" {
+                Ok(SourceType::Int(loc))
+            } else {
+                Ok(SourceType::Named(loc, type_name))
+            }
         }
     }
 
@@ -445,30 +449,11 @@ impl Parser {
         Err(Error::ExpectedExpr(self.loc))
     }
 
-    fn parse_var(&mut self) -> Result<Var, Error> {
-        if self.input().starts_with(lower_ident_char) {
-            let n = self.parse_lower_ident()?;
-            return Ok(Var::Local(n));
-        }
-        if self.input().starts_with(upper_ident_char) {
-            let n = self.parse_upper_ident()?;
-            return Ok(Var::Constructor(n));
-        }
-        if self.input().starts_with(operator_char) {
-            // To ensure we don't parse x -> y as x - <parse error>
-            if !self.input().starts_with("->") {
-                let (_, op) = self.parse_operator()?;
-                return Ok(op);
-            }
-        }
-        Err(Error::ExpectedExpr(self.loc))
-    }
-
     fn parse_match(&mut self) -> Result<Expr, Error> {
         let loc = self.loc;
         self.eat("match")?;
         self.trim();
-        let target = self.parse_var()?;
+        let target = self.parse_expr()?;
         self.trim();
         self.eat("{")?;
         self.trim();
@@ -487,7 +472,7 @@ impl Parser {
         self.trim();
         Ok(Expr::Match {
             loc,
-            target,
+            target: Box::new(target),
             branches,
         })
     }
@@ -542,20 +527,20 @@ impl Parser {
             self.trim();
             return Ok(Pattern::Int { loc, value });
         }
-        if self.input().starts_with(upper_ident_char) {
+        if self.input().starts_with(lower_ident_char) {
             let loc = self.loc;
-            let name = self.parse_upper_ident()?;
-            self.trim();
-            return Ok(Pattern::Constructor { loc, name, args: vec![] });
+            let name = self.parse_lower_ident()?;
+            if name == "_" {
+                return Ok(Pattern::Wildcard { loc }) }
+            else {
+                return Ok(Pattern::Var { loc, name });
+            }
         }
 
         let loc = self.loc;
-        let name = self.parse_lower_ident()?;
-        if name == "_" {
-            return Ok(Pattern::Wildcard { loc }) }
-        else {
-            return Ok(Pattern::Var { loc, name });
-        }
+        let name = self.parse_upper_ident()?;
+        self.trim();
+        Ok(Pattern::Constructor { loc, name, args: vec![] })
     }
 
     fn parse_int(&mut self) -> Result<(Loc, i64), Error> {
