@@ -169,8 +169,8 @@ impl Typechecker {
         source_type: &SourceType,
         loc: Loc,
     ) -> Result<(), Error> {
-        // Check that function name is not already in use
-        // Check that type is well-formed
+        // TODO: Check that function name is not already in use
+        // TODO: Check that type is well-formed
         let ty = Type::from_source_type(&source_type);
         self.functions.insert(name.to_string(), (loc, ty));
         Ok(())

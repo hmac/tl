@@ -14,6 +14,7 @@ pub enum Error {
     ExpectedOperator(Loc),
     ExpectedInteger(Loc),
     UnexpectedEof(Loc),
+    ExpectedType(Loc),
 }
 
 impl HasLoc for Error {
@@ -28,6 +29,7 @@ impl HasLoc for Error {
             Error::ExpectedOperator(loc) => *loc,
             Error::ExpectedInteger(loc) => *loc,
             Error::UnexpectedEof(loc) => *loc,
+            Error::ExpectedType(loc) => *loc,
         }
     }
 }
@@ -61,6 +63,9 @@ impl std::fmt::Display for Error {
             }
             Error::UnexpectedEof(_) => {
                 write!(f, "unexpected EOF")
+            }
+            Error::ExpectedType(_) => {
+                write!(f, "expected a type")
             }
         }
     }
@@ -201,17 +206,21 @@ impl Parser {
         // Parse a sequence of "type components", which are things that can make up a type.
         // We then construct the actual type from this sequence.
         // This allows us to deal with arrows and type applications.
-        let mut components = vec![];
+        let mut components = VecDeque::new();
         loop {
             match self.try_parse_type_component() {
                 Some(c) => {
-                    components.push(c);
+                    components.push_back(c);
                 }
                 None => {
                     break;
                 }
             }
             self.trim();
+        }
+
+        if components.is_empty() {
+            return Err(Error::ExpectedType(self.loc))
         }
 
         // Now convert the list of components into a type.
@@ -247,12 +256,10 @@ impl Parser {
 
     fn make_type_from_components(
         &self,
-        mut components: Vec<(Loc, TypeComponent)>,
+        mut components: VecDeque<(Loc, TypeComponent)>,
     ) -> Result<SourceType, Error> {
-        components.reverse();
-
         let ty = {
-            let (loc, c) = components.pop().unwrap();
+            let (loc, c) = components.pop_front().unwrap();
             self.make_type_from_single_component(loc, c)?
         };
 
@@ -260,13 +267,16 @@ impl Parser {
             return Ok(ty);
         }
 
-        match components.pop() {
+        match components.pop_front() {
             Some((loc, c)) => match c {
                 TypeComponent::Arrow => {
                     let rest = self.make_type_from_components(components)?;
                     Ok(SourceType::Func(loc, Box::new(ty), Box::new(rest)))
                 }
-                TypeComponent::Named(_) | TypeComponent::Int =>{
+                TypeComponent::Type(_) => {
+                    // Note: this code is currently dead, because we don't support polymorphism and
+                    // so there are no type applications.
+
                     // We have two non-arrow types in a row, so we're looking at a type
                     // application. Take components from the list until we reach the end or we
                     // reach an arrow.
@@ -276,7 +286,7 @@ impl Parser {
                     let mut args = vec![first_arg];
 
                     loop {
-                        let c = components.pop();
+                        let c = components.pop_front();
                         match c {
                             Some((_, TypeComponent::Arrow)) => { break; },
                             Some((loc, c)) => {
@@ -305,24 +315,23 @@ impl Parser {
 
     fn make_type_from_single_component(&self, loc: Loc, component: TypeComponent) -> Result<SourceType, Error> {
         match component {
-            TypeComponent::Named(c) => Ok(SourceType::Named(loc, c)),
-            TypeComponent::Int => Ok(SourceType::Int(loc)),
             TypeComponent::Arrow => Err(Error::ExpectedNamedType(loc)),
+            TypeComponent::Type(t) => Ok(t)
         }
     }
 
 
     fn try_parse_type_component(&mut self) -> Option<(Loc, TypeComponent)> {
         let loc = self.loc;
-        match self.try_eat("->") {
-            Some(_) => Some((loc, TypeComponent::Arrow)),
-            None => {
-                let name = self.parse_upper_ident();
-                match name {
-                    Err(_) => None,
-                    Ok(s) if s == "Int" => Some((loc, TypeComponent::Int)),
-                    Ok(n) => Some((loc, TypeComponent::Named(n))),
-                }
+        if self.input().starts_with("->") {
+            self.eat("->").unwrap();
+            return Some((loc, TypeComponent::Arrow))
+        }
+
+        match self.parse_type_nested() {
+            Err(_) => None,
+            Ok(ty) => {
+                Some((loc, TypeComponent::Type(ty)))
             }
         }
     }
@@ -657,6 +666,5 @@ fn operator_char(c: char) -> bool {
 #[derive(Debug)]
 enum TypeComponent {
     Arrow,
-    Named(String),
-    Int,
+    Type(SourceType)
 }
