@@ -2,8 +2,12 @@ apply : (a -> b) -> a -> b {
   f x -> f x
 }
 
+applytwice : (a -> a) -> a -> a {
+  f x -> f (f x)
+}
+
 main : Int {
-  apply (x -> + x 1) 1
+  applytwice (x -> + x 1) 1
 }
 ---
-2
+3

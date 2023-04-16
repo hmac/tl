@@ -1,12 +1,13 @@
-// Polymorphism
+// Polymorphism in types
 // Not yet supported.
 
-apply : (a -> b) -> a -> b {
-  f x -> f x
-}
+type Bool { True, False }
 
-apply2 : (a -> a) -> a -> a {
-  f x -> f (f x)
+not : Bool -> Bool {
+  b -> match b {
+    True -> False,
+    False -> True,
+  }
 }
 
 type List a {
