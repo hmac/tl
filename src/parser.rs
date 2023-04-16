@@ -442,16 +442,10 @@ impl Parser {
             self.trim();
             return Ok(e);
         }
-        // TODO: merge with parse_var
-        if self.input().starts_with(lower_ident_char) {
+        if self.input().starts_with(lower_ident_char) || self.input().starts_with(upper_ident_char) {
             let loc = self.loc;
-            let n = self.parse_lower_ident()?;
-            return Ok(Expr::Var(loc, Var::Local(n)));
-        }
-        if self.input().starts_with(upper_ident_char) {
-            let loc = self.loc;
-            let n = self.parse_upper_ident()?;
-            return Ok(Expr::Var(loc, Var::Constructor(n)));
+            let var = self.parse_var_or_constructor()?;
+            return Ok(Expr::Var(loc, var));
         }
         if self.input().starts_with(operator_char) {
             // To ensure we don't parse x -> y as x - <parse error>
@@ -461,6 +455,37 @@ impl Parser {
             }
         }
         Err(Error::ExpectedExpr(self.loc))
+    }
+
+    fn parse_var_or_constructor(&mut self) -> Result<Var, Error> {
+        let loc = self.loc;
+
+        let mut leading_underscores = 0;
+        while self.input().starts_with('_') {
+            self.eat("_")?;
+            leading_underscores += 1;
+        }
+
+        if self.input().starts_with(upper_ident_char) {
+            let n = self.parse_upper_ident()?;
+            let s = format!("{}{n}", "_".repeat(leading_underscores));
+            return Ok(Var::Constructor(s))
+        }
+
+        if self.input().starts_with(lower_ident_char) {
+            let n = self.parse_lower_ident()?;
+            let s = format!("{}{n}", "_".repeat(leading_underscores));
+            return Ok(Var::Local(s));
+        }
+
+        // If there are no more valid characters left, but we have parsed some underscores,
+        // then the result is a local variable.
+        if leading_underscores > 0 {
+            let s = "_".repeat(leading_underscores);
+            return Ok(Var::Local(s));
+        } else {
+            return Err(Error::ExpectedLowerIdent(loc))
+        }
     }
 
     fn parse_match(&mut self) -> Result<Expr, Error> {
@@ -609,6 +634,9 @@ impl Parser {
         })
     }
 
+    /// Parse an uppercase identifier.
+    /// It must start with an uppercase letter or underscore, followed by zero or more alphanumeric
+    /// chars or underscores.
     fn parse_upper_ident(&mut self) -> Result<String, Error> {
         if !self.input().starts_with(upper_ident_char) {
             return Err(Error::ExpectedUpperIdent(self.loc));
@@ -616,7 +644,7 @@ impl Parser {
 
         let mut len = 1;
 
-        while self.input()[len..].starts_with(alpha_or_underscore_char) {
+        while self.input()[len..].starts_with(alphanum_or_underscore_char) {
             len += 1;
         }
 
@@ -626,6 +654,9 @@ impl Parser {
         Ok(m)
     }
 
+    /// Parse a lowercase identifier.
+    /// It must start with a lowercase letter or underscore, followed by zero or more alphanumeric
+    /// chars or underscores.
     fn parse_lower_ident(&mut self) -> Result<String, Error> {
         if !self.input().starts_with(lower_ident_char) {
             return Err(Error::ExpectedLowerIdent(self.loc));
@@ -633,7 +664,7 @@ impl Parser {
 
         let mut len = 1;
 
-        while self.input()[len..].starts_with(alpha_or_underscore_char) {
+        while self.input()[len..].starts_with(alphanum_or_underscore_char) {
             len += 1;
         }
 
@@ -652,8 +683,8 @@ fn upper_ident_char(c: char) -> bool {
     c == '_' || (c >= 'A' && c <= 'Z')
 }
 
-fn alpha_or_underscore_char(c: char) -> bool {
-    c == '_' || (c >= 'A' && c <= 'z')
+fn alphanum_or_underscore_char(c: char) -> bool {
+    c == '_' || (c >= 'A' && c <= 'z') || (c >= '0' && c <= '9')
 }
 
 fn whitespace_char(c: char) -> bool {
