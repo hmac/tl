@@ -30,6 +30,7 @@ pub enum Error {
     DuplicateConstructor { existing: (Loc, Type), duplicate: TypeConstructor },
     CannotApplyNonFunction { loc: Loc, actual_type: Type },
     TooManyArgumentsInApplication { loc: Loc, max_number_of_arguments: usize, actual_number_of_arguments: usize },
+    OccursCheck { loc: Loc, expected: Type, actual: Type },
 }
 
 impl HasLoc for Error {
@@ -47,6 +48,7 @@ impl HasLoc for Error {
             Error::DuplicateConstructor { duplicate, .. } => duplicate.loc,
             Error::CannotApplyNonFunction { loc, .. } => *loc,
             Error::TooManyArgumentsInApplication { loc, .. } => *loc,
+            Error::OccursCheck { loc, .. } => *loc
         }
     }
 }
@@ -112,6 +114,12 @@ impl std::fmt::Display for Error {
                     f,
                     "this function takes {max_number_of_arguments} {}, but is given {actual_number_of_arguments}",
                     if *max_number_of_arguments > 1 { "arguments" } else { "argument" }
+                )
+            }
+            Error::OccursCheck { expected, actual, .. } => {
+                write!(
+                    f,
+                    "expected this to have the type {expected}, but it actually has the type {actual}. These types cannot be unified because one refers to the other."
                 )
             }
         }
@@ -180,17 +188,17 @@ impl Typechecker {
 
     pub fn check_func(&self, func: &Expr, expected_type: &SourceType) -> Result<(), Error> {
         let mut existing_type_variables = HashMap::new();
-        let (ty, vars) = self.generate_fresh_type_variables(expected_type.clone(), &existing_type_variables);
+        let (ty, vars) = self.generate_fresh_type_variables(Type::from_source_type(expected_type), &existing_type_variables);
         for var in vars {
             existing_type_variables.insert(var, None);
         }
-        self.check_expr(&LocalVariables::new(), &existing_type_variables, func, &ty)
+        self.check_expr(&LocalVariables::new(), &mut existing_type_variables, func, &ty)
     }
 
     /// Generate fresh names for new type variables introduced in `ty`.
     /// Type variables are collected and renamed if they conflict with an existing in-scope
     /// type variable.
-    fn generate_fresh_type_variables(&self, ty: SourceType, existing_type_variables: &TypeVariables) -> (Type, Vec<String>) {
+    fn generate_fresh_type_variables(&self, mut ty: Type, existing_type_variables: &TypeVariables) -> (Type, Vec<String>) {
         let mut vars: Vec<String> = ty.vars();
         // If any of these vars conflict with an existing var, we must rename them.
         // Then we must update any occurrences of the renamed variables in the type.
@@ -207,7 +215,6 @@ impl Typechecker {
             }
         }
 
-        let mut ty = Type::from_source_type(&ty);
         ty.rename_vars(&substitution);
 
         // Update our list of variables with the substituion
@@ -235,15 +242,15 @@ impl Typechecker {
     fn check_expr(
         &self,
         local_variables: &LocalVariables<Type>,
-        type_variables: &TypeVariables,
+        type_variables: &mut TypeVariables,
         expr: &Expr,
         expected_type: &Type,
     ) -> Result<(), Error> {
         match expr {
-            Expr::Int(loc, _) => self.assert_type_eq(expected_type, &TYPE_INT, *loc),
+            Expr::Int(loc, _) => self.assert_type_eq(type_variables, expected_type, &TYPE_INT, *loc),
             Expr::Var(loc, v) => {
-                let ty = self.infer_var(local_variables, v, *loc)?;
-                self.assert_type_eq(expected_type, &ty, *loc)
+                let ty = self.infer_var(local_variables, type_variables, v, *loc)?;
+                self.assert_type_eq(type_variables, expected_type, &ty, *loc)
             }
             Expr::Match {
                 target,
@@ -333,16 +340,16 @@ impl Typechecker {
                 let mut head_type_args: VecDeque<_> = head_type_args.collect();
                 head_type_args.push_back(head_type_result);
                 let result_type = Type::from_func_args(&Vec::from(head_type_args));
-                self.assert_type_eq(expected_type, &result_type, *loc)?;
+                self.assert_type_eq(type_variables, expected_type, &result_type, *loc)?;
                 Ok(())
             }
         }
     }
 
-    fn infer_expr(&self, local_variables: &LocalVariables<Type>, type_variables: &TypeVariables, expr: &Expr) -> Result<Type, Error> {
+    fn infer_expr(&self, local_variables: &LocalVariables<Type>, type_variables: &mut TypeVariables, expr: &Expr) -> Result<Type, Error> {
         match expr {
             Expr::Int(_, _) => Ok(TYPE_INT),
-            Expr::Var(loc, v) => self.infer_var(local_variables, v, *loc),
+            Expr::Var(loc, v) => self.infer_var(local_variables, type_variables, v, *loc),
             Expr::Match {
                 target,
                 branches,
@@ -407,14 +414,14 @@ impl Typechecker {
     fn check_match_expr(
         &self,
         local_variables: &LocalVariables<Type>,
-        type_variables: &TypeVariables,
+        type_variables: &mut TypeVariables,
         branches: &Vec<MatchBranch>,
         target_type: &Type,
         result_type: &Type,
     ) -> Result<(), Error> {
         // For each branch...
         for branch in branches {
-            let new_vars = self.check_match_branch_pattern(&branch.pattern, target_type)?;
+            let new_vars = self.check_match_branch_pattern(type_variables, &branch.pattern, target_type)?;
             let local_variables = local_variables.extend(new_vars);
             self.check_expr(&local_variables, type_variables, &branch.rhs, result_type)?;
         }
@@ -424,14 +431,14 @@ impl Typechecker {
     
     /// Check that `pattern` has type `expected_type` and return a map of variables bound by the
     /// pattern.
-    fn check_match_branch_pattern(&self, pattern: &Pattern, expected_type: &Type) -> Result<HashMap<String, Type>, Error> {
+    fn check_match_branch_pattern(&self, type_variables: &mut TypeVariables, pattern: &Pattern, expected_type: &Type) -> Result<HashMap<String, Type>, Error> {
         let mut new_vars = HashMap::new();
         match pattern {
             Pattern::Var { name, .. } => {
                 new_vars.insert(name.to_string(), (*expected_type).clone());
             },
             Pattern::Int { loc, .. } => {
-                self.assert_type_eq(expected_type, &TYPE_INT, *loc)?;
+                self.assert_type_eq(type_variables, expected_type, &TYPE_INT, *loc)?;
             }
             Pattern::Wildcard { .. } => {},
             Pattern::Constructor { name, args, loc, .. } => {
@@ -443,7 +450,7 @@ impl Typechecker {
                     Some((_, ty)) => {
                         // func_args always returns a non-empty vector, so this unwrap is safe
                         let ctor_result_type = *ty.func_args().back().unwrap();
-                        self.assert_type_eq(expected_type, &ctor_result_type, *loc)?;
+                        self.assert_type_eq(type_variables, expected_type, &ctor_result_type, *loc)?;
                         ty
                     }
                 };
@@ -462,7 +469,7 @@ impl Typechecker {
 
                 // Add each pattern to the set of local variables
                 for (pattern, ty) in args.iter().zip(ctor_ty_args.into_iter()) {
-                    let vars = self.check_match_branch_pattern(&pattern, &ty)?;
+                    let vars = self.check_match_branch_pattern(type_variables, &pattern, &ty)?;
                     new_vars.extend(vars);
                 }
             },
@@ -473,11 +480,12 @@ impl Typechecker {
     fn infer_var(
         &self,
         local_variables: &LocalVariables<Type>,
+        type_variables: &mut TypeVariables,
         var: &Var,
         loc: Loc,
     ) -> Result<Type, Error> {
         match var {
-            Var::Local(s) => self.lookup(local_variables, s, loc),
+            Var::Local(s) => self.lookup(local_variables, type_variables, s, loc),
             Var::Constructor(s) => match self.constructors.get(s) {
                 Some((_, ty)) => Ok(ty.clone()),
                 None => Err(Error::UnknownConstructor(loc, s.to_string())),
@@ -494,7 +502,7 @@ impl Typechecker {
     fn infer_match_branch(
         &self,
         local_variables: &LocalVariables<Type>,
-        type_variables: &TypeVariables,
+        type_variables: &mut TypeVariables,
         target_type: &Type,
         branch: &MatchBranch,
     ) -> Result<Type, Error> {
@@ -513,7 +521,7 @@ impl Typechecker {
                         ));
                     }
                     Some((loc, ty)) => {
-                        self.assert_type_eq(&target_type, &ty, *loc)?;
+                        self.assert_type_eq(type_variables, &target_type, &ty, *loc)?;
                         ty
                     }
                 };
@@ -551,27 +559,92 @@ impl Typechecker {
     fn lookup(
         &self,
         local_variables: &LocalVariables<Type>,
+        type_variables: &mut TypeVariables,
         name: &str,
         loc: Loc,
     ) -> Result<Type, Error> {
         match local_variables.lookup(name) {
             Some(ty) => Ok(ty.clone()),
             None => match self.functions.get(name) {
-                Some((_, ty)) => Ok(ty.clone()),
+                Some((_, ty)) => {
+                    // This function type may have type varaibles that we must instantiate.
+                    let (ty, vars) = self.generate_fresh_type_variables(ty.clone(), type_variables);
+                    for var in vars {
+                        type_variables.insert(var, None);
+                    }
+                    Ok(ty.clone())
+                }
                 None => Err(Error::UnknownVariable(loc, name.to_string())),
             },
         }
     }
 
-    fn assert_type_eq(&self, expected: &Type, actual: &Type, loc: Loc) -> Result<(), Error> {
+    fn assert_type_eq(&self, type_variables: &mut TypeVariables, expected: &Type, actual: &Type, loc: Loc) -> Result<(), Error> {
         if expected == actual {
             return Ok(());
         }
+
+
+        if self.try_solve_type_var(type_variables, expected, actual, loc)? {
+            return Ok(());
+        }
+
+        if self.try_solve_type_var(type_variables, actual, expected, loc)? {
+            return Ok(());
+        }
+
         Err(Error::ExpectedType {
             loc,
             expected: expected.clone(),
             actual: actual.clone(),
         })
+    }
+
+    /// Returns true if it has solved the type variable.
+    fn try_solve_type_var(&self, type_variables: &mut TypeVariables, expected: &Type, actual: &Type, loc: Loc) -> Result<bool, Error> {
+        // If A is a type var, and B is a type that _does not mention_ A, then set A = B.
+        if let Type::Var(v) = expected {
+            // First, resolve B if it is a type varaible
+            let mut actual_resolved: Type = (*actual).clone();
+            match &actual_resolved {
+                Type::Var(v) => match type_variables.get(v) {
+                    Some(Some(t)) => { actual_resolved = t.clone() },
+                    _ => {},
+                }
+                _ => {}
+            };
+
+            if actual_resolved.vars().contains(&v) {
+                return Err(Error::OccursCheck {
+                    loc,
+                    expected: expected.clone(),
+                    actual: actual_resolved.clone(),
+                })
+            }
+
+            dbg!(&type_variables, &expected, &actual_resolved);
+            match type_variables.get_mut(v) {
+                None => {
+                    unreachable!();
+                }
+                Some(t) => {
+                    match t {
+                        None => {
+                            *t = Some(actual_resolved);
+                            return Ok(true);
+                        }
+                        Some(t) => {
+                            if t == actual {
+                                return Ok(true);
+                            } else {
+                                return Err(Error::ExpectedType { loc, expected: t.clone(), actual: actual_resolved })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// Check the well-formedness of all registered types.

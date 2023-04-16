@@ -151,26 +151,6 @@ impl HasLoc for SourceType {
     }
 }
 
-impl SourceType {
-    pub fn vars(&self) -> Vec<String> {
-        match self {
-            SourceType::Named(_, _) | SourceType::Int(_) => vec![],
-            SourceType::Func(_, f, x) => {
-                let mut vars = f.vars();
-                vars.append(&mut x.vars());
-                vars
-            }
-            SourceType::App { head, args, .. } => {
-                let mut vars = head.vars();
-                for arg in args {
-                    vars.append(&mut arg.vars());
-                }
-                vars
-            }
-            SourceType::Var(_, v) => vec![v.to_string()],
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// A type as used in typechecking.
@@ -185,6 +165,27 @@ pub enum Type {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         self.fmt_with_context(f, TypeFormatContext::Neutral)
+    }
+}
+
+impl Type {
+    pub fn vars(&self) -> Vec<String> {
+        match self {
+            Type::Named(_) | Type::Int => vec![],
+            Type::Func(f, x) => {
+                let mut vars = f.vars();
+                vars.append(&mut x.vars());
+                vars
+            }
+            Type::App { head, args } => {
+                let mut vars = head.vars();
+                for arg in args {
+                    vars.append(&mut arg.vars());
+                }
+                vars
+            }
+            Type::Var(v) => vec![v.to_string()],
+        }
     }
 }
 
