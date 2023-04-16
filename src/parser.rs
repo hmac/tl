@@ -245,11 +245,16 @@ impl Parser {
             return Ok(ty);
         } else {
             let loc = self.loc;
-            let type_name = self.parse_upper_ident()?;
-            if type_name == "Int" {
-                Ok(SourceType::Int(loc))
+            if self.input().starts_with(upper_ident_char) {
+                let type_name = self.parse_upper_ident()?;
+                if type_name == "Int" {
+                    Ok(SourceType::Int(loc))
+                } else {
+                    Ok(SourceType::Named(loc, type_name))
+                }
             } else {
-                Ok(SourceType::Named(loc, type_name))
+                let type_var = self.parse_lower_ident()?;
+                Ok(SourceType::Var(loc, type_var))
             }
         }
     }

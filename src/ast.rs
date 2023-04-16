@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashMap};
 
 pub type Loc = usize;
 
@@ -136,6 +136,7 @@ pub enum SourceType {
         head: Box<SourceType>,
         args: Vec<SourceType>,
     },
+    Var(Loc, String)
 }
 
 impl HasLoc for SourceType {
@@ -145,6 +146,28 @@ impl HasLoc for SourceType {
             Self::Func(loc, _, _) => *loc,
             Self::Int(loc) => *loc,
             Self::App { loc, ..} => *loc,
+            Self::Var(loc, _) => *loc,
+        }
+    }
+}
+
+impl SourceType {
+    pub fn vars(&self) -> Vec<String> {
+        match self {
+            SourceType::Named(_, _) | SourceType::Int(_) => vec![],
+            SourceType::Func(_, f, x) => {
+                let mut vars = f.vars();
+                vars.append(&mut x.vars());
+                vars
+            }
+            SourceType::App { head, args, .. } => {
+                let mut vars = head.vars();
+                for arg in args {
+                    vars.append(&mut arg.vars());
+                }
+                vars
+            }
+            SourceType::Var(_, v) => vec![v.to_string()],
         }
     }
 }
@@ -156,6 +179,7 @@ pub enum Type {
     Func(Box<Type>, Box<Type>),
     Int,
     App { head: Box<Type>, args: Vec<Type> },
+    Var(String)
 }
 
 impl std::fmt::Display for Type {
@@ -175,6 +199,7 @@ impl Type {
     fn fmt_with_context(&self, f: &mut std::fmt::Formatter<'_>, context: TypeFormatContext) -> Result<(), std::fmt::Error> {
         match self {
             Type::Named(n) => write!(f, "{}", n),
+            Type::Var(v) => write!(f, "{}", v),
             Type::Func(func, arg) => match context {
                 TypeFormatContext::Neutral => {
                     (*func).fmt_with_context(f, TypeFormatContext::FuncLeft)?;
@@ -203,6 +228,28 @@ impl Type {
                     write!(f, ")")
                 }
             }
+        }
+    }
+
+    pub fn rename_vars(&mut self, substitution: &HashMap<String, String>) {
+        match self {
+            Type::Named(_) => {},
+            Type::Func(f, x) => {
+                f.rename_vars(substitution);
+                x.rename_vars(substitution);
+            },
+            Type::Int => {},
+            Type::App { head, args } => {
+                head.rename_vars(substitution);
+                for arg in args {
+                    arg.rename_vars(substitution);
+                }
+            },
+            Type::Var(v) => {
+                if let Some(new_var) = substitution.get(v) {
+                    *v = new_var.clone();
+                }
+            },
         }
     }
 }
@@ -352,6 +399,7 @@ impl Type {
                 let args = args.iter().map(|arg| Type::from_source_type(arg)).collect();
                 Self::App { head: Box::new(head), args }
             }
+            SourceType::Var(_, v) => Type::Var(v.to_string())
         }
     }
 }

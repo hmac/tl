@@ -118,6 +118,8 @@ impl std::fmt::Display for Error {
     }
 }
 
+type TypeVariables = HashMap<String, Option<Type>>;
+
 pub struct Typechecker {
     constructors: HashMap<String, (Loc, Type)>,
     types: HashSet<String>,
@@ -177,13 +179,63 @@ impl Typechecker {
     }
 
     pub fn check_func(&self, func: &Expr, expected_type: &SourceType) -> Result<(), Error> {
-        let ty = Type::from_source_type(expected_type);
-        self.check_expr(&LocalVariables::new(), func, &ty)
+        let mut existing_type_variables = HashMap::new();
+        let (ty, vars) = self.generate_fresh_type_variables(expected_type.clone(), &existing_type_variables);
+        for var in vars {
+            existing_type_variables.insert(var, None);
+        }
+        self.check_expr(&LocalVariables::new(), &existing_type_variables, func, &ty)
+    }
+
+    /// Generate fresh names for new type variables introduced in `ty`.
+    /// Type variables are collected and renamed if they conflict with an existing in-scope
+    /// type variable.
+    fn generate_fresh_type_variables(&self, ty: SourceType, existing_type_variables: &TypeVariables) -> (Type, Vec<String>) {
+        let mut vars: Vec<String> = ty.vars();
+        // If any of these vars conflict with an existing var, we must rename them.
+        // Then we must update any occurrences of the renamed variables in the type.
+        let mut substitution: HashMap<String, String> = HashMap::new();
+        for var in vars.iter_mut() {
+            match self.rename(var.as_str(), existing_type_variables) {
+                // Variable was not renamed - nothing to do.
+                None => {},
+                Some(renamed) => {
+                    // Variable was renamed, so we must add it to the substitution
+                    substitution.insert(var.clone(), renamed.clone());
+                    *var = renamed;
+                }
+            }
+        }
+
+        let mut ty = Type::from_source_type(&ty);
+        ty.rename_vars(&substitution);
+
+        // Update our list of variables with the substituion
+        vars = vars.into_iter().map(|v| substitution.remove(&v).unwrap_or(v)).collect();
+
+        (ty, vars)
+    }
+
+    // TODO: make standalone function
+    fn rename(&self, var: &str, existing_type_variables: &TypeVariables) -> Option<String> {
+        if !existing_type_variables.contains_key(var) {
+            return None;
+        }
+
+        let mut n: usize = 0;
+        loop {
+            n +=  1;
+            let new_var = format!("{var}{n}");
+            if !existing_type_variables.contains_key(&new_var) {
+                return Some(new_var);
+            }
+        }
     }
 
     fn check_expr(
         &self,
         local_variables: &LocalVariables<Type>,
+        type_variables: &TypeVariables,
         expr: &Expr,
         expected_type: &Type,
     ) -> Result<(), Error> {
@@ -200,14 +252,14 @@ impl Typechecker {
                 ..
             } => {
                 // Infer the type of the target
-                let target_type = self.infer_expr(local_variables, target)?;
+                let target_type = self.infer_expr(local_variables, type_variables, target)?;
 
                 // There must be at least one branch
                 if branches.is_empty() {
                     return Err(Error::EmptyMatch(*loc));
                 }
 
-                self.check_match_expr(local_variables, branches, &target_type, &expected_type)?;
+                self.check_match_expr(local_variables, type_variables, branches, &target_type, &expected_type)?;
 
                 Ok(())
             }
@@ -234,6 +286,7 @@ impl Typechecker {
 
                 self.check_expr(
                     &local_variables.extend(new_locals),
+                    type_variables,
                     body,
                     &result_type,
                 )
@@ -242,7 +295,7 @@ impl Typechecker {
                 head, args, loc, ..
             } => {
                 // Infer type of head
-                let head_type = self.infer_expr(local_variables, head)?;
+                let head_type = self.infer_expr(local_variables, type_variables, head)?;
 
                 // Check that head is a function type
                 match head_type {
@@ -270,7 +323,7 @@ impl Typechecker {
                 for arg in args {
                     match head_type_args.next() {
                         Some(ty) => {
-                            self.check_expr(local_variables, arg, ty)?;
+                            self.check_expr(local_variables, type_variables, arg, ty)?;
                         }
                         None => unreachable!()
                     }
@@ -286,7 +339,7 @@ impl Typechecker {
         }
     }
 
-    fn infer_expr(&self, local_variables: &LocalVariables<Type>, expr: &Expr) -> Result<Type, Error> {
+    fn infer_expr(&self, local_variables: &LocalVariables<Type>, type_variables: &TypeVariables, expr: &Expr) -> Result<Type, Error> {
         match expr {
             Expr::Int(_, _) => Ok(TYPE_INT),
             Expr::Var(loc, v) => self.infer_var(local_variables, v, *loc),
@@ -297,7 +350,7 @@ impl Typechecker {
                 ..
             } => {
                 // Infer the type of the target
-                let target_type = self.infer_expr(local_variables, target)?;
+                let target_type = self.infer_expr(local_variables, type_variables, target)?;
 
                 // There must be at least one branch
                 if branches.is_empty() {
@@ -306,9 +359,9 @@ impl Typechecker {
 
                 // Infer the return type of the first branch
                 let result_type =
-                    self.infer_match_branch(local_variables, &target_type, &branches[0])?;
+                    self.infer_match_branch(local_variables, type_variables, &target_type, &branches[0])?;
 
-                self.check_match_expr(local_variables, branches, &target_type, &result_type)?;
+                self.check_match_expr(local_variables, type_variables, branches, &target_type, &result_type)?;
 
                 Ok(result_type)
             }
@@ -317,7 +370,7 @@ impl Typechecker {
                 head, args, loc, ..
             } => {
                 // Infer the type of the function
-                let head_ty = self.infer_expr(local_variables, &head)?;
+                let head_ty = self.infer_expr(local_variables, type_variables, &head)?;
 
                 // Deconstruct the function type
                 match head_ty {
@@ -329,7 +382,7 @@ impl Typechecker {
                         for arg in args {
                             match func_arg_types.next() {
                                 Some(arg_type) => {
-                                    self.check_expr(local_variables, arg, arg_type)?;
+                                    self.check_expr(local_variables, type_variables, arg, arg_type)?;
                                 }
                                 None => {
                                     todo!("what error to return here?");
@@ -354,6 +407,7 @@ impl Typechecker {
     fn check_match_expr(
         &self,
         local_variables: &LocalVariables<Type>,
+        type_variables: &TypeVariables,
         branches: &Vec<MatchBranch>,
         target_type: &Type,
         result_type: &Type,
@@ -362,7 +416,7 @@ impl Typechecker {
         for branch in branches {
             let new_vars = self.check_match_branch_pattern(&branch.pattern, target_type)?;
             let local_variables = local_variables.extend(new_vars);
-            self.check_expr(&local_variables, &branch.rhs, result_type)?;
+            self.check_expr(&local_variables, type_variables, &branch.rhs, result_type)?;
         }
 
         Ok(())
@@ -440,12 +494,13 @@ impl Typechecker {
     fn infer_match_branch(
         &self,
         local_variables: &LocalVariables<Type>,
+        type_variables: &TypeVariables,
         target_type: &Type,
         branch: &MatchBranch,
     ) -> Result<Type, Error> {
         match &branch.pattern {
             Pattern::Int { .. } | Pattern::Wildcard { .. } => {
-                self.infer_expr(&local_variables, &branch.rhs)
+                self.infer_expr(local_variables, type_variables, &branch.rhs)
             },
             Pattern::Var { .. } => todo!(),
             Pattern::Constructor { name, args, .. } => {
@@ -488,7 +543,7 @@ impl Typechecker {
                 let local_variables = local_variables.extend(new_vars);
 
                 // Infer the rhs
-                self.infer_expr(&local_variables, &branch.rhs)
+                self.infer_expr(&local_variables, type_variables, &branch.rhs)
             }
         }
     }
@@ -547,7 +602,8 @@ impl Typechecker {
                 for arg in args {
                     self.check_type(arg, loc)?;
                 }
-            }
+            },
+            Type::Var(_) => todo!()
         }
         Ok(())
     }
