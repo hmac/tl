@@ -156,19 +156,16 @@ impl Parser {
             Some(_) => {
                 self.trim();
                 let name = self.parse_upper_ident()?;
-                let mut type_variables = vec![];
-                loop {
+                self.trim();
+
+                let mut params = vec![];
+                while self.input().starts_with(lower_ident_char) {
+                    let param = self.parse_lower_ident()?;
+                    params.push(param);
                     self.trim();
-                    match self.try_eat("{") {
-                        Some(_) => {
-                            break;
-                        }
-                        None => {
-                            let var = self.parse_lower_ident()?;
-                            type_variables.push(var);
-                        }
-                    }
                 }
+
+                self.eat("{")?;
                 let mut constructors = vec![];
                 loop {
                     self.trim();
@@ -187,6 +184,7 @@ impl Parser {
                 Ok(Decl::Type {
                     loc: (loc, self.loc),
                     name,
+                    params,
                     constructors,
                 })
             }

@@ -2,13 +2,13 @@
 
 type Bool { True, False }
 
-type BoolPair { MkPair Bool Bool }
+type Pair a { MkPair a a }
 
 f : Int -> Int -> Int { x y -> + x y }
 
 g : Int -> Int -> Int { x y -> - (*  x y) x }
 
-main : BoolPair {
+main : Pair Bool {
   // comment inside function
   MkPair True (not True)
 }
@@ -26,11 +26,11 @@ constint : Int -> Int -> Int {
 
 type Unit { Unit }
 
-idunit : Unit -> Unit {
-  u -> Unit
+id : a -> a {
+  x -> x
 }
 
-andpair : BoolPair -> Bool {
+andpair : Pair Bool -> Bool {
   p -> match p {
     MkPair a b -> and a b
   }
