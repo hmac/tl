@@ -1,69 +1,97 @@
-type List {
+type List a {
   Nil,
-  Cons Int List
+  Cons a (List a)
 }
 
-length : List -> Int {
+length : List a -> Int {
   l -> match l {
     Nil -> 0,
     Cons _ l -> + 1 (length l)
   }
 }
 
-map : (Int -> Int) -> List -> List {
+map : (a -> b) -> List a -> List b {
   f l -> match l {
     Nil -> Nil,
     Cons x xs -> Cons (f x) (map f xs)
   }
 }
 
-fold : (Int -> Int -> Int) -> Int -> List -> Int {
+fold : (a -> b -> b) -> b -> List a -> b {
   f z l -> match l {
     Nil -> z,
     Cons x xs -> f x (fold f z xs)
   }
 }
 
-lengthtwo : List -> Int {
+// fold1 (+) [1, 2, 3] == (+ 
+
+length2 : List a -> Int {
   l -> fold (_ acc -> + acc 1) 0 l
 }
 
-type ListPair {
-  NilPair,
-  ConsPair Int Int ListPair
-}
-
-zip : List -> List -> ListPair {
+zip : List a -> List b -> List (Pair a b) {
   l r -> match l {
-    Nil -> NilPair,
+    Nil -> Nil,
     Cons lx lxx -> match r {
-      Nil -> NilPair,
-      Cons rx rxx -> ConsPair lx rx (zip lxx rxx)
+      Nil -> Nil,
+      Cons rx rxx -> Cons (Pair lx rx) (zip lxx rxx)
     }
   }
 }
 
-type Pair { Pair Int Int }
+type NonEmptyList a {
+  NonEmptyList a (List a)
+}
 
-type MaybePair { NoPair, SomePair Pair }
-
-headpair : ListPair -> MaybePair {
-  l -> match l {
-    NilPair -> NoPair,
-    ConsPair x y _ -> SomePair (Pair x y)
+fold_ne : (a -> b -> b) -> b -> NonEmptyList a -> b {
+  f z l -> match l {
+    NonEmptyList x xs -> f x (fold f z xs)
   }
 }
 
-elimpair : (Int -> Int -> Int) -> Pair -> Int {
+fold1 : (a -> a -> b) -> NonEmptyList a -> b {
+  f l -> match l {
+    NonEmptyList x xs -> fold f x xs
+  }
+}
+
+non_empty_list : a -> List a -> NonEmptyList a {
+  x l -> NonEmptyList x l
+}
+
+all : (a -> Bool) -> NonEmptyList a -> Bool {
+  p l -> fold1 (a b -> and (p a) b) l
+}
+
+and : Bool -> Bool -> Bool {
+  x y -> match x {
+    True -> y,
+    False -> False
+  }
+}
+
+type Pair a b { Pair a b }
+
+type Maybe a { None, Some a }
+
+head : List a -> Maybe a {
+  l -> match l {
+    Nil -> None,
+    Cons x _ -> Some x
+  }
+}
+
+elimPair : (a -> b -> c) -> Pair a b -> c {
   f pair -> match pair {
     Pair x y -> f x y
   }
 }
 
 main : Int {
- match (headpair (zip (Cons 1 (Cons 2 Nil)) (Cons 3 (Cons 4 Nil)))) {
-   NoPair -> 0,
-   SomePair p -> elimpair (x y -> + x y) p
+ match (head (zip (Cons 1 (Cons 2 Nil)) (Cons 3 (Cons 4 Nil)))) {
+   None -> 0,
+   Some p -> elimPair (x y -> + x y) p
  }
 }
 ---

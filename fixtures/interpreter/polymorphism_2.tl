@@ -1,6 +1,3 @@
-// Polymorphism in types
-// Not yet supported.
-
 type Bool { True, False }
 
 not : Bool -> Bool {
@@ -25,3 +22,7 @@ empty : List a -> Bool {
 not_empty : List a -> Bool {
   list -> not (empty list)
 }
+
+main : Bool { empty Nil }
+---
+True

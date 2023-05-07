@@ -92,6 +92,7 @@ pub enum Decl {
     Type {
         loc: Loc,
         name: String,
+        params: Vec<String>,
         constructors: Vec<TypeConstructor>,
     },
     Func {
@@ -152,7 +153,7 @@ impl HasLoc for SourceType {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A type as used in typechecking.
 pub enum Type {
     Named(String),
@@ -217,8 +218,8 @@ impl Type {
             Type::App { head, args } => match context {
                 TypeFormatContext::Neutral | TypeFormatContext::AppLeft => {
                     (*head).fmt_with_context(f, TypeFormatContext::AppLeft)?;
-                    write!(f, " ")?;
                     for arg in args {
+                        write!(f, " ")?;
                         arg.fmt_with_context(f, TypeFormatContext::AppRight)?;
                     }
                     Ok(())

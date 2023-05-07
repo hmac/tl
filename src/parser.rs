@@ -157,6 +157,14 @@ impl Parser {
                 self.trim();
                 let name = self.parse_upper_ident()?;
                 self.trim();
+
+                let mut params = vec![];
+                while self.input().starts_with(lower_ident_char) {
+                    let param = self.parse_lower_ident()?;
+                    params.push(param);
+                    self.trim();
+                }
+
                 self.eat("{")?;
                 let mut constructors = vec![];
                 loop {
@@ -176,6 +184,7 @@ impl Parser {
                 Ok(Decl::Type {
                     loc,
                     name,
+                    params,
                     constructors,
                 })
             }
@@ -618,7 +627,7 @@ impl Parser {
         self.trim();
         let mut arguments = vec![];
         loop {
-            if self.input().starts_with(upper_ident_char)  || self.input().starts_with("(") {
+            if self.input().starts_with(upper_ident_char) || self.input().starts_with(lower_ident_char)  || self.input().starts_with("(") {
                 let arg = self.parse_type_nested()?;
                 self.trim();
                 arguments.push(arg);

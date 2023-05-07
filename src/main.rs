@@ -16,5 +16,6 @@ fn main() {
 
     let mut runner = tl::Runner::from_path(&PathBuf::from(input_file), stdout).unwrap();
 
-    runner.run(&function).unwrap();
+    let result = runner.run(&function).unwrap();
+    println!("{}", result);
 }

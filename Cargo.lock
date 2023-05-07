@@ -5,3 +5,12 @@ version = 3
 [[package]]
 name = "tl"
 version = "0.1.0"
+dependencies = [
+ "union-find-rs",
+]
+
+[[package]]
+name = "union-find-rs"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d7cf5ae6c8635588ab0aa0ddd0ba68b7586c96cd00f8d12337071219f9c885f"
