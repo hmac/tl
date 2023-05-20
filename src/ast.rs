@@ -1,6 +1,7 @@
-use std::collections::{VecDeque, HashMap};
+use std::collections::{HashMap, VecDeque};
 
-pub type Loc = usize;
+/// (start, end) index pair into the source string
+pub type Loc = (usize, usize);
 
 fn calculate_lines(s: &str) -> Vec<usize> {
     s.match_indices('\n').map(|(n, _)| n).collect()
@@ -65,21 +66,57 @@ fn string_index_to_line_col_number(
 //     ^
 // expected '-'
 //
-pub fn print_error<E: std::fmt::Display + HasLoc, W: std::io::Write>(writer: &mut W, orig: &str, error: E) {
-    let loc = error.loc();
+pub fn print_error<E: std::fmt::Display + HasLoc, W: std::io::Write>(
+    writer: &mut W,
+    orig: &str,
+    error: E,
+) {
+    let (start, end) = error.loc();
     let newlines = calculate_lines(orig);
-    let (line, col) = string_index_to_line_col_number(loc, &newlines);
+    let (start_line, start_col) = string_index_to_line_col_number(start, &newlines);
+    let (_end_line, end_col) = string_index_to_line_col_number(end, &newlines);
     let mut source_lines = orig.split('\n');
 
     // Print the previous line, if it exists
-    if line > 1 {
-        writeln!(writer, "{:>4}: {}", line - 1, source_lines.nth(line - 2).unwrap()).unwrap();
-        writeln!(writer, "{:>4}: {}", line, source_lines.next().unwrap()).unwrap();
+    // We assume that start_line == end_line for now
+    if start_line > 1 {
+        writeln!(
+            writer,
+            "{:>4}: {}",
+            start_line - 1,
+            source_lines.nth(start_line - 2).unwrap()
+        )
+        .unwrap();
+        writeln!(
+            writer,
+            "{:>4}: {}",
+            start_line,
+            source_lines.next().unwrap()
+        )
+        .unwrap();
     } else {
-        writeln!(writer, "{:>4}: {}", line, source_lines.nth(line - 1).unwrap()).unwrap();
+        writeln!(
+            writer,
+            "{:>4}: {}",
+            start_line,
+            source_lines.nth(start_line - 1).unwrap()
+        )
+        .unwrap();
     }
-    writeln!(writer, "     {}^", " ".repeat(col)).unwrap();
-    writeln!(writer, "     {} {}", " ".repeat(col), error.to_string()).unwrap();
+    writeln!(
+        writer,
+        "     {}{}",
+        " ".repeat(start_col),
+        "^".repeat(end_col - start_col)
+    )
+    .unwrap();
+    writeln!(
+        writer,
+        "     {} {}",
+        " ".repeat(start_col),
+        error.to_string()
+    )
+    .unwrap();
 }
 
 /// A trait for types that have a source location.
@@ -136,7 +173,7 @@ pub enum SourceType {
         head: Box<SourceType>,
         args: Vec<SourceType>,
     },
-    Var(Loc, String)
+    Var(Loc, String),
 }
 
 impl HasLoc for SourceType {
@@ -145,12 +182,11 @@ impl HasLoc for SourceType {
             Self::Named(loc, _) => *loc,
             Self::Func(loc, _, _) => *loc,
             Self::Int(loc) => *loc,
-            Self::App { loc, ..} => *loc,
+            Self::App { loc, .. } => *loc,
             Self::Var(loc, _) => *loc,
         }
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// A type as used in typechecking.
@@ -159,7 +195,7 @@ pub enum Type {
     Func(Box<Type>, Box<Type>),
     Int,
     App { head: Box<Type>, args: Vec<Type> },
-    Var(String)
+    Var(String),
 }
 
 impl std::fmt::Display for Type {
@@ -197,7 +233,11 @@ enum TypeFormatContext {
 }
 
 impl Type {
-    fn fmt_with_context(&self, f: &mut std::fmt::Formatter<'_>, context: TypeFormatContext) -> Result<(), std::fmt::Error> {
+    fn fmt_with_context(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        context: TypeFormatContext,
+    ) -> Result<(), std::fmt::Error> {
         match self {
             Type::Named(n) => write!(f, "{}", n),
             Type::Var(v) => write!(f, "{}", v),
@@ -207,12 +247,14 @@ impl Type {
                     write!(f, " -> ")?;
                     (*arg).fmt_with_context(f, TypeFormatContext::Neutral)
                 }
-                TypeFormatContext::FuncLeft | TypeFormatContext::AppRight | TypeFormatContext::AppLeft => {
+                TypeFormatContext::FuncLeft
+                | TypeFormatContext::AppRight
+                | TypeFormatContext::AppLeft => {
                     write!(f, "(")?;
                     self.fmt_with_context(f, TypeFormatContext::Neutral)?;
                     write!(f, ")")
                 }
-            }
+            },
             Type::Int => write!(f, "Int"),
             Type::App { head, args } => match context {
                 TypeFormatContext::Neutral | TypeFormatContext::AppLeft => {
@@ -222,35 +264,35 @@ impl Type {
                         arg.fmt_with_context(f, TypeFormatContext::AppRight)?;
                     }
                     Ok(())
-                },
+                }
                 TypeFormatContext::FuncLeft | TypeFormatContext::AppRight => {
                     write!(f, "(")?;
                     self.fmt_with_context(f, TypeFormatContext::Neutral)?;
                     write!(f, ")")
                 }
-            }
+            },
         }
     }
 
     pub fn rename_vars(&mut self, substitution: &HashMap<String, String>) {
         match self {
-            Type::Named(_) => {},
+            Type::Named(_) => {}
             Type::Func(f, x) => {
                 f.rename_vars(substitution);
                 x.rename_vars(substitution);
-            },
-            Type::Int => {},
+            }
+            Type::Int => {}
             Type::App { head, args } => {
                 head.rename_vars(substitution);
                 for arg in args {
                     arg.rename_vars(substitution);
                 }
-            },
+            }
             Type::Var(v) => {
                 if let Some(new_var) = substitution.get(v) {
                     *v = new_var.clone();
                 }
-            },
+            }
         }
     }
 }
@@ -303,10 +345,22 @@ impl HasLoc for MatchBranch {
 
 #[derive(Debug, Clone)]
 pub enum Pattern {
-    Constructor { loc: Loc, name: String, args: Vec<Pattern> },
-    Var { loc: Loc, name: String },
-    Int { loc: Loc, value: i64 },
-    Wildcard { loc: Loc }
+    Constructor {
+        loc: Loc,
+        name: String,
+        args: Vec<Pattern>,
+    },
+    Var {
+        loc: Loc,
+        name: String,
+    },
+    Int {
+        loc: Loc,
+        value: i64,
+    },
+    Wildcard {
+        loc: Loc,
+    },
 }
 
 impl std::fmt::Display for Pattern {
@@ -319,10 +373,10 @@ impl std::fmt::Display for Pattern {
                     write!(f, " {}", arg)?;
                 }
                 Ok(())
-            },
+            }
             Pattern::Int { value, .. } => write!(f, "{}", value),
             Pattern::Var { name, .. } => write!(f, "{}", name),
-            Pattern::Wildcard { .. } => write!(f, "_")
+            Pattern::Wildcard { .. } => write!(f, "_"),
         }
     }
 }
@@ -333,7 +387,7 @@ impl HasLoc for Pattern {
             Self::Var { loc, .. } => *loc,
             Self::Int { loc, .. } => *loc,
             Self::Constructor { loc, .. } => *loc,
-            Self::Wildcard { loc, .. } => *loc
+            Self::Wildcard { loc, .. } => *loc,
         }
     }
 }
@@ -398,9 +452,12 @@ impl Type {
             SourceType::App { head, args, .. } => {
                 let head = Type::from_source_type(head);
                 let args = args.iter().map(|arg| Type::from_source_type(arg)).collect();
-                Self::App { head: Box::new(head), args }
+                Self::App {
+                    head: Box::new(head),
+                    args,
+                }
             }
-            SourceType::Var(_, v) => Type::Var(v.to_string())
+            SourceType::Var(_, v) => Type::Var(v.to_string()),
         }
     }
 }

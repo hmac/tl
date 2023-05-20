@@ -101,7 +101,7 @@ impl Parser {
     fn eat(&mut self, s: &'static str) -> Result<(), Error> {
         match self.try_eat(s) {
             Some(_) => Ok(()),
-            None => Err(Error::ExpectedStr(s, self.loc)),
+            None => Err(Error::ExpectedStr(s, (self.loc, self.loc))),
         }
     }
 
@@ -111,7 +111,7 @@ impl Parser {
                 self.loc += 1;
                 Ok(c)
             }
-            None => Err(Error::UnexpectedEof(self.loc)),
+            None => Err(Error::UnexpectedEof((self.loc, self.loc))),
         }
     }
 
@@ -174,7 +174,7 @@ impl Parser {
                     }
                 }
                 Ok(Decl::Type {
-                    loc,
+                    loc: (loc, self.loc),
                     name,
                     constructors,
                 })
@@ -193,7 +193,7 @@ impl Parser {
                 self.eat("}")?;
                 self.trim();
                 Ok(Decl::Func {
-                    loc,
+                    loc: (loc, self.loc),
                     name,
                     r#type,
                     body,
@@ -220,7 +220,7 @@ impl Parser {
         }
 
         if components.is_empty() {
-            return Err(Error::ExpectedType(self.loc))
+            return Err(Error::ExpectedType((self.loc, self.loc)));
         }
 
         // Now convert the list of components into a type.
@@ -248,13 +248,13 @@ impl Parser {
             if self.input().starts_with(upper_ident_char) {
                 let type_name = self.parse_upper_ident()?;
                 if type_name == "Int" {
-                    Ok(SourceType::Int(loc))
+                    Ok(SourceType::Int((loc, self.loc)))
                 } else {
-                    Ok(SourceType::Named(loc, type_name))
+                    Ok(SourceType::Named((loc, self.loc), type_name))
                 }
             } else {
                 let type_var = self.parse_lower_ident()?;
-                Ok(SourceType::Var(loc, type_var))
+                Ok(SourceType::Var((loc, self.loc), type_var))
             }
         }
     }
@@ -293,15 +293,23 @@ impl Parser {
                     loop {
                         let c = components.pop_front();
                         match c {
-                            Some((_, TypeComponent::Arrow)) => { break; },
+                            Some((_, TypeComponent::Arrow)) => {
+                                break;
+                            }
                             Some((loc, c)) => {
                                 let c_ty = self.make_type_from_single_component(loc, c)?;
                                 args.push(c_ty);
                             }
-                            None => { break; }
+                            None => {
+                                break;
+                            }
                         }
                     }
-                    let app = SourceType::App { loc: ty.loc(), head: Box::new(ty), args };
+                    let app = SourceType::App {
+                        loc: ty.loc(),
+                        head: Box::new(ty),
+                        args,
+                    };
 
                     // If there are components left, then we have just parsed a type application to
                     // the left of an arrow.
@@ -312,32 +320,33 @@ impl Parser {
                         // Otherwise, we're done and the result is the application.
                         Ok(app)
                     }
-                },
+                }
             },
             None => Ok(ty),
         }
     }
 
-    fn make_type_from_single_component(&self, loc: Loc, component: TypeComponent) -> Result<SourceType, Error> {
+    fn make_type_from_single_component(
+        &self,
+        loc: Loc,
+        component: TypeComponent,
+    ) -> Result<SourceType, Error> {
         match component {
             TypeComponent::Arrow => Err(Error::ExpectedNamedType(loc)),
-            TypeComponent::Type(t) => Ok(t)
+            TypeComponent::Type(t) => Ok(t),
         }
     }
-
 
     fn try_parse_type_component(&mut self) -> Option<(Loc, TypeComponent)> {
         let loc = self.loc;
         if self.input().starts_with("->") {
             self.eat("->").unwrap();
-            return Some((loc, TypeComponent::Arrow))
+            return Some(((loc, self.loc), TypeComponent::Arrow));
         }
 
         match self.parse_type_nested() {
             Err(_) => None,
-            Ok(ty) => {
-                Some((loc, TypeComponent::Type(ty)))
-            }
+            Ok(ty) => Some(((loc, self.loc), TypeComponent::Type(ty))),
         }
     }
 
@@ -378,7 +387,7 @@ impl Parser {
                                     args.push((loc, n));
                                 }
                                 _ => {
-                                    return Err(Error::ExpectedPattern(loc));
+                                    return Err(Error::ExpectedPattern((loc, self.loc)));
                                 }
                             }
                         }
@@ -392,7 +401,7 @@ impl Parser {
                         self.trim();
 
                         return Ok(Expr::Func {
-                            loc,
+                            loc: (loc, self.loc),
                             args,
                             body: Box::new(body),
                         });
@@ -402,7 +411,7 @@ impl Parser {
                     // Construct the application
                     match exprs.pop_front() {
                         None => {
-                            return Err(Error::ExpectedExpr(self.loc));
+                            return Err(Error::ExpectedExpr((self.loc, self.loc)));
                         }
                         Some(f) => {
                             let args: Vec<_> = exprs.into_iter().collect();
@@ -442,10 +451,11 @@ impl Parser {
             self.trim();
             return Ok(e);
         }
-        if self.input().starts_with(lower_ident_char) || self.input().starts_with(upper_ident_char) {
+        if self.input().starts_with(lower_ident_char) || self.input().starts_with(upper_ident_char)
+        {
             let loc = self.loc;
             let var = self.parse_var_or_constructor()?;
-            return Ok(Expr::Var(loc, var));
+            return Ok(Expr::Var((loc, self.loc), var));
         }
         if self.input().starts_with(operator_char) {
             // To ensure we don't parse x -> y as x - <parse error>
@@ -454,7 +464,7 @@ impl Parser {
                 return Ok(Expr::Var(loc, op));
             }
         }
-        Err(Error::ExpectedExpr(self.loc))
+        Err(Error::ExpectedExpr((self.loc, self.loc)))
     }
 
     fn parse_var_or_constructor(&mut self) -> Result<Var, Error> {
@@ -469,7 +479,7 @@ impl Parser {
         if self.input().starts_with(upper_ident_char) {
             let n = self.parse_upper_ident()?;
             let s = format!("{}{n}", "_".repeat(leading_underscores));
-            return Ok(Var::Constructor(s))
+            return Ok(Var::Constructor(s));
         }
 
         if self.input().starts_with(lower_ident_char) {
@@ -484,7 +494,7 @@ impl Parser {
             let s = "_".repeat(leading_underscores);
             return Ok(Var::Local(s));
         } else {
-            return Err(Error::ExpectedLowerIdent(loc))
+            return Err(Error::ExpectedLowerIdent((loc, self.loc)));
         }
     }
 
@@ -510,7 +520,7 @@ impl Parser {
         self.eat("}")?;
         self.trim();
         Ok(Expr::Match {
-            loc,
+            loc: (loc, self.loc),
             target: Box::new(target),
             branches,
         })
@@ -523,7 +533,11 @@ impl Parser {
         self.eat("->")?;
         self.trim();
         let rhs = self.parse_expr()?;
-        Ok(MatchBranch { loc, pattern, rhs })
+        Ok(MatchBranch {
+            loc: (loc, self.loc),
+            pattern,
+            rhs,
+        })
     }
 
     fn parse_pattern(&mut self) -> Result<Pattern, Error> {
@@ -539,9 +553,14 @@ impl Parser {
             let loc = self.loc;
             let name = self.parse_lower_ident()?;
             if name == "_" {
-                return Ok(Pattern::Wildcard { loc }) }
-            else {
-                return Ok(Pattern::Var { loc, name });
+                return Ok(Pattern::Wildcard {
+                    loc: (loc, self.loc),
+                });
+            } else {
+                return Ok(Pattern::Var {
+                    loc: (loc, self.loc),
+                    name,
+                });
             }
         }
 
@@ -557,7 +576,11 @@ impl Parser {
             args.push(pattern);
             self.trim();
         }
-        Ok(Pattern::Constructor { loc, name, args })
+        Ok(Pattern::Constructor {
+            loc: (loc, self.loc),
+            name,
+            args,
+        })
     }
 
     fn parse_pattern_nested(&mut self) -> Result<Pattern, Error> {
@@ -570,19 +593,29 @@ impl Parser {
             let loc = self.loc;
             let name = self.parse_lower_ident()?;
             if name == "_" {
-                return Ok(Pattern::Wildcard { loc }) }
-            else {
-                return Ok(Pattern::Var { loc, name });
+                return Ok(Pattern::Wildcard {
+                    loc: (loc, self.loc),
+                });
+            } else {
+                return Ok(Pattern::Var {
+                    loc: (loc, self.loc),
+                    name,
+                });
             }
         }
 
         let loc = self.loc;
         let name = self.parse_upper_ident()?;
         self.trim();
-        Ok(Pattern::Constructor { loc, name, args: vec![] })
+        Ok(Pattern::Constructor {
+            loc: (loc, self.loc),
+            name,
+            args: vec![],
+        })
     }
 
     fn parse_int(&mut self) -> Result<(Loc, i64), Error> {
+        let loc = self.loc;
         let mut len = 0;
         while self.input()[len..].starts_with(char::is_numeric) {
             len += 1;
@@ -591,11 +624,10 @@ impl Parser {
         let (s, _) = self.input().split_at(len);
         match s.parse() {
             Ok(n) => {
-                let r = (self.loc, n);
                 self.loc += len;
-                Ok(r)
+                Ok(((loc, self.loc), n))
             }
-            Err(_) => Err(Error::ExpectedInteger(self.loc)),
+            Err(_) => Err(Error::ExpectedInteger((loc, self.loc))),
         }
     }
 
@@ -606,10 +638,10 @@ impl Parser {
             '-' => Operator::Sub,
             '*' => Operator::Mul,
             _ => {
-                return Err(Error::ExpectedOperator(self.loc - 1));
+                return Err(Error::ExpectedOperator((self.loc - 1, self.loc - 1)));
             }
         };
-        Ok((self.loc - 1, Var::Operator(op)))
+        Ok(((self.loc - 1, self.loc - 1), Var::Operator(op)))
     }
 
     fn parse_type_constructor(&mut self) -> Result<TypeConstructor, Error> {
@@ -618,16 +650,16 @@ impl Parser {
         self.trim();
         let mut arguments = vec![];
         loop {
-            if self.input().starts_with(upper_ident_char)  || self.input().starts_with("(") {
+            if self.input().starts_with(upper_ident_char) || self.input().starts_with("(") {
                 let arg = self.parse_type_nested()?;
                 self.trim();
                 arguments.push(arg);
             } else {
                 break;
-            } 
+            }
         }
         Ok(TypeConstructor {
-            loc,
+            loc: (loc, self.loc),
             name,
             variables: vec![],
             arguments,
@@ -639,7 +671,7 @@ impl Parser {
     /// chars or underscores.
     fn parse_upper_ident(&mut self) -> Result<String, Error> {
         if !self.input().starts_with(upper_ident_char) {
-            return Err(Error::ExpectedUpperIdent(self.loc));
+            return Err(Error::ExpectedUpperIdent((self.loc, self.loc)));
         }
 
         let mut len = 1;
@@ -659,7 +691,7 @@ impl Parser {
     /// chars or underscores.
     fn parse_lower_ident(&mut self) -> Result<String, Error> {
         if !self.input().starts_with(lower_ident_char) {
-            return Err(Error::ExpectedLowerIdent(self.loc));
+            return Err(Error::ExpectedLowerIdent((self.loc, self.loc)));
         }
 
         let mut len = 1;
@@ -702,5 +734,5 @@ fn operator_char(c: char) -> bool {
 #[derive(Debug)]
 enum TypeComponent {
     Arrow,
-    Type(SourceType)
+    Type(SourceType),
 }
