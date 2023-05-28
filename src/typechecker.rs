@@ -750,16 +750,6 @@ impl Typechecker {
                 self.assert_type_eq(type_variables, x_expected, x_actual, loc)?;
                 Ok(())
             }
-            (Type::Func(_, _), _) => Err(Error::ExpectedType {
-                loc,
-                expected: expected.clone(),
-                actual: actual.clone(),
-            }),
-            (_, Type::Func(_, _)) => Err(Error::ExpectedType {
-                loc,
-                expected: expected.clone(),
-                actual: actual.clone(),
-            }),
         }
     }
 
