@@ -67,7 +67,9 @@ impl<'a> Runner<'a> {
                         } => {
                             typechecker.register_func(&name, &r#type, *loc).unwrap();
                         }
-                        Decl::Test { .. } => {}
+                        Decl::Test { .. } => {
+                            // TODO: typecheck test functions
+                        }
                     }
                 }
 
@@ -139,5 +141,28 @@ impl<'a> Runner<'a> {
                 Err(Error::Eval)
             }
         }
+    }
+
+    pub fn run_tests(&mut self) -> Result<(), Error> {
+        for decl in &self.ast {
+            match decl {
+                Decl::Test { name, body, .. } => {
+                    match self
+                        .interpreter
+                        .eval(&local_variables::LocalVariables::new(), &body)
+                    {
+                        Ok(_) => {
+                            writeln!(&mut self.output, "{name}: PASS\n")?;
+                        }
+                        Err(error) => {
+                            writeln!(&mut self.output, "{name}: FAIL\n")?;
+                            writeln!(&mut self.output, "{:?}", error)?;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 }

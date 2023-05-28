@@ -2,20 +2,47 @@ use std::path::PathBuf;
 
 const USAGE: &'static str = "
 Usage:
-  tl <PATH> <FUNC>
+  tl run <PATH> <FUNC>
+  tl test <PATH>
 
   Example:
 
-    tl foo/bar.tl my_func
+    tl run foo/bar.tl my_func
+    tl test foo/bar.tl
+
 ";
 
 fn main() {
-    let input_file = std::env::args().nth(1).expect(USAGE);
-    let function = std::env::args().nth(2).expect(USAGE);
-    let stdout = std::io::stdout();
+    let mut args = std::env::args();
+    args.next(); // skip program name
 
-    let mut runner = tl::Runner::from_path(&PathBuf::from(input_file), stdout).unwrap();
+    match args.next() {
+        Some(cmd) => match cmd.as_str() {
+            "run" => {
+                let input_file = args.next().expect(USAGE);
+                let function = args.next().expect(USAGE);
+                let stdout = std::io::stdout();
 
-    let result = runner.run(&function).unwrap();
-    println!("{}", result);
+                let mut runner = tl::Runner::from_path(&PathBuf::from(input_file), stdout).unwrap();
+
+                let result = runner.run(&function).unwrap();
+                println!("{}", result);
+            }
+            "test" => {
+                let input_file = args.next().expect(USAGE);
+                let stdout = std::io::stdout();
+
+                let mut runner = tl::Runner::from_path(&PathBuf::from(input_file), stdout).unwrap();
+
+                runner.run_tests().unwrap();
+            }
+            _ => fail(),
+        },
+        None => fail(),
+    }
+}
+
+fn fail() {
+    println!("{}", USAGE);
+    std::process::exit(-1)
 }
