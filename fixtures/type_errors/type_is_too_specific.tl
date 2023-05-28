@@ -10,5 +10,5 @@ Error:
 
    5: main : a -> a {
    6:   _ -> True
-             ^
+             ^^^^
               expected this to have the type a, but it actually has the type Bool

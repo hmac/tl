@@ -188,26 +188,44 @@ impl Parser {
                     constructors,
                 })
             }
-            None => {
-                let name = self.parse_lower_ident()?;
-                self.trim();
-                self.eat(":")?;
-                self.trim();
-                let r#type = self.parse_type()?;
-                self.trim();
-                self.eat("{")?;
-                self.trim();
-                let body = self.parse_expr()?;
-                self.trim();
-                self.eat("}")?;
-                self.trim();
-                Ok(Decl::Func {
-                    loc: (loc, self.loc),
-                    name,
-                    r#type,
-                    body,
-                })
-            }
+            None => match self.try_eat("test") {
+                Some(_) => {
+                    self.trim();
+                    let name = self.parse_lower_ident()?;
+                    self.trim();
+                    self.eat("{")?;
+                    self.trim();
+                    let body = self.parse_expr()?;
+                    self.trim();
+                    self.eat("}")?;
+                    self.trim();
+                    Ok(Decl::Test {
+                        loc: (loc, self.loc),
+                        name,
+                        body,
+                    })
+                }
+                None => {
+                    let name = self.parse_lower_ident()?;
+                    self.trim();
+                    self.eat(":")?;
+                    self.trim();
+                    let r#type = self.parse_type()?;
+                    self.trim();
+                    self.eat("{")?;
+                    self.trim();
+                    let body = self.parse_expr()?;
+                    self.trim();
+                    self.eat("}")?;
+                    self.trim();
+                    Ok(Decl::Func {
+                        loc: (loc, self.loc),
+                        name,
+                        r#type,
+                        body,
+                    })
+                }
+            },
         }
     }
 

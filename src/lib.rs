@@ -67,6 +67,7 @@ impl<'a> Runner<'a> {
                         } => {
                             typechecker.register_func(&name, &r#type, *loc).unwrap();
                         }
+                        Decl::Test { .. } => {}
                     }
                 }
 

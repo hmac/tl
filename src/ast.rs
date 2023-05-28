@@ -138,6 +138,11 @@ pub enum Decl {
         r#type: SourceType,
         body: Expr,
     },
+    Test {
+        loc: Loc,
+        name: String,
+        body: Expr,
+    },
 }
 
 impl HasLoc for Decl {
@@ -145,6 +150,7 @@ impl HasLoc for Decl {
         match self {
             Self::Type { loc, .. } => *loc,
             Self::Func { loc, .. } => *loc,
+            Self::Test { loc, .. } => *loc,
         }
     }
 }
