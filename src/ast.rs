@@ -107,7 +107,7 @@ pub fn print_error<E: std::fmt::Display + HasLoc, W: std::io::Write>(
         writer,
         "     {}{}",
         " ".repeat(start_col),
-        "^".repeat(end_col - start_col)
+        "^".repeat(1.max(end_col - start_col))
     )
     .unwrap();
     writeln!(

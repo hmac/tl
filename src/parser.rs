@@ -156,8 +156,19 @@ impl Parser {
             Some(_) => {
                 self.trim();
                 let name = self.parse_upper_ident()?;
-                self.trim();
-                self.eat("{")?;
+                let mut type_variables = vec![];
+                loop {
+                    self.trim();
+                    match self.try_eat("{") {
+                        Some(_) => {
+                            break;
+                        }
+                        None => {
+                            let var = self.parse_lower_ident()?;
+                            type_variables.push(var);
+                        }
+                    }
+                }
                 let mut constructors = vec![];
                 loop {
                     self.trim();
@@ -650,7 +661,10 @@ impl Parser {
         self.trim();
         let mut arguments = vec![];
         loop {
-            if self.input().starts_with(upper_ident_char) || self.input().starts_with("(") {
+            if self.input().starts_with(upper_ident_char)
+                || self.input().starts_with(lower_ident_char)
+                || self.input().starts_with("(")
+            {
                 let arg = self.parse_type_nested()?;
                 self.trim();
                 arguments.push(arg);
