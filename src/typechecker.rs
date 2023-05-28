@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ast::*;
 use crate::local_variables::LocalVariables;
-use crate::union_find::TypeEqualitySet;
 
 const TYPE_INT: Type = Type::Int;
 
@@ -230,14 +229,7 @@ impl Typechecker {
         for var in ty.vars() {
             type_variables.insert(var, VarState::Poly);
         }
-        let mut type_set = TypeEqualitySet::new();
-        self.check_expr(
-            &LocalVariables::new(),
-            &mut type_variables,
-            &mut type_set,
-            func,
-            &ty,
-        )
+        self.check_expr(&LocalVariables::new(), &mut type_variables, func, &ty)
     }
 
     /// Generate fresh names for new type variables introduced in `ty`.
@@ -295,18 +287,17 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
-        type_set: &mut TypeEqualitySet,
         expr: &Expr,
         expected_type: &Type,
     ) -> Result<(), Error> {
         eprintln!("check_expr({:?}, {})", expr, expected_type);
         match expr {
             Expr::Int(loc, _) => {
-                self.assert_type_eq(type_variables, type_set, expected_type, &TYPE_INT, *loc)
+                self.assert_type_eq(type_variables, expected_type, &TYPE_INT, *loc)
             }
             Expr::Var(loc, v) => {
                 let ty = self.infer_var(local_variables, type_variables, v, *loc)?;
-                self.assert_type_eq(type_variables, type_set, expected_type, &ty, *loc)
+                self.assert_type_eq(type_variables, expected_type, &ty, *loc)
             }
             Expr::Match {
                 target,
@@ -315,8 +306,7 @@ impl Typechecker {
                 ..
             } => {
                 // Infer the type of the target
-                let target_type =
-                    self.infer_expr(local_variables, type_variables, type_set, target)?;
+                let target_type = self.infer_expr(local_variables, type_variables, target)?;
 
                 // There must be at least one branch
                 if branches.is_empty() {
@@ -326,7 +316,6 @@ impl Typechecker {
                 self.check_match_expr(
                     local_variables,
                     type_variables,
-                    type_set,
                     branches,
                     &target_type,
                     &expected_type,
@@ -358,7 +347,6 @@ impl Typechecker {
                 self.check_expr(
                     &local_variables.extend(new_locals),
                     type_variables,
-                    type_set,
                     body,
                     &result_type,
                 )
@@ -367,7 +355,7 @@ impl Typechecker {
                 head, args, loc, ..
             } => {
                 // Infer type of head
-                let head_type = self.infer_expr(local_variables, type_variables, type_set, head)?;
+                let head_type = self.infer_expr(local_variables, type_variables, head)?;
 
                 // Check that head is a function type
                 match head_type {
@@ -398,7 +386,7 @@ impl Typechecker {
                 for arg in args {
                     match head_type_args.next() {
                         Some(ty) => {
-                            self.check_expr(local_variables, type_variables, type_set, arg, ty)?;
+                            self.check_expr(local_variables, type_variables, arg, ty)?;
                         }
                         None => unreachable!(),
                     }
@@ -408,7 +396,7 @@ impl Typechecker {
                 let mut head_type_args: VecDeque<_> = head_type_args.collect();
                 head_type_args.push_back(head_type_result);
                 let result_type = Type::from_func_args(&Vec::from(head_type_args));
-                self.assert_type_eq(type_variables, type_set, expected_type, &result_type, *loc)?;
+                self.assert_type_eq(type_variables, expected_type, &result_type, *loc)?;
                 Ok(())
             }
         }
@@ -418,7 +406,6 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
-        type_set: &mut TypeEqualitySet,
         expr: &Expr,
     ) -> Result<Type, Error> {
         match expr {
@@ -431,8 +418,7 @@ impl Typechecker {
                 ..
             } => {
                 // Infer the type of the target
-                let target_type =
-                    self.infer_expr(local_variables, type_variables, type_set, target)?;
+                let target_type = self.infer_expr(local_variables, type_variables, target)?;
 
                 // There must be at least one branch
                 if branches.is_empty() {
@@ -443,7 +429,6 @@ impl Typechecker {
                 let result_type = self.infer_match_branch(
                     local_variables,
                     type_variables,
-                    type_set,
                     &target_type,
                     &branches[0],
                 )?;
@@ -451,7 +436,6 @@ impl Typechecker {
                 self.check_match_expr(
                     local_variables,
                     type_variables,
-                    type_set,
                     branches,
                     &target_type,
                     &result_type,
@@ -464,7 +448,7 @@ impl Typechecker {
                 head, args, loc, ..
             } => {
                 // Infer the type of the function
-                let head_ty = self.infer_expr(local_variables, type_variables, type_set, &head)?;
+                let head_ty = self.infer_expr(local_variables, type_variables, &head)?;
 
                 // Deconstruct the function type
                 match head_ty {
@@ -479,7 +463,6 @@ impl Typechecker {
                                     self.check_expr(
                                         local_variables,
                                         type_variables,
-                                        type_set,
                                         arg,
                                         arg_type,
                                     )?;
@@ -508,27 +491,16 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
-        type_set: &mut TypeEqualitySet,
         branches: &Vec<MatchBranch>,
         target_type: &Type,
         result_type: &Type,
     ) -> Result<(), Error> {
         // For each branch...
         for branch in branches {
-            let new_vars = self.check_match_branch_pattern(
-                type_variables,
-                type_set,
-                &branch.pattern,
-                target_type,
-            )?;
+            let new_vars =
+                self.check_match_branch_pattern(type_variables, &branch.pattern, target_type)?;
             let local_variables = local_variables.extend(new_vars);
-            self.check_expr(
-                &local_variables,
-                type_variables,
-                type_set,
-                &branch.rhs,
-                result_type,
-            )?;
+            self.check_expr(&local_variables, type_variables, &branch.rhs, result_type)?;
         }
 
         Ok(())
@@ -539,7 +511,6 @@ impl Typechecker {
     fn check_match_branch_pattern(
         &self,
         type_variables: &mut TypeVariables,
-        type_set: &mut TypeEqualitySet,
         pattern: &Pattern,
         expected_type: &Type,
     ) -> Result<HashMap<String, Type>, Error> {
@@ -549,7 +520,7 @@ impl Typechecker {
                 new_vars.insert(name.to_string(), (*expected_type).clone());
             }
             Pattern::Int { loc, .. } => {
-                self.assert_type_eq(type_variables, type_set, expected_type, &TYPE_INT, *loc)?;
+                self.assert_type_eq(type_variables, expected_type, &TYPE_INT, *loc)?;
             }
             Pattern::Wildcard { .. } => {}
             Pattern::Constructor {
@@ -561,13 +532,7 @@ impl Typechecker {
 
                     // func_args always returns a non-empty vector, so this unwrap is safe
                     let ctor_result_type = *ty.func_args().back().unwrap();
-                    self.assert_type_eq(
-                        type_variables,
-                        type_set,
-                        expected_type,
-                        &ctor_result_type,
-                        *loc,
-                    )?;
+                    self.assert_type_eq(type_variables, expected_type, &ctor_result_type, *loc)?;
                     ty
                 };
 
@@ -585,8 +550,7 @@ impl Typechecker {
 
                 // Add each pattern to the set of local variables
                 for (pattern, ty) in args.iter().zip(ctor_ty_args.into_iter()) {
-                    let vars =
-                        self.check_match_branch_pattern(type_variables, type_set, &pattern, &ty)?;
+                    let vars = self.check_match_branch_pattern(type_variables, &pattern, &ty)?;
                     new_vars.extend(vars);
                 }
             }
@@ -617,13 +581,12 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
-        type_set: &mut TypeEqualitySet,
         target_type: &Type,
         branch: &MatchBranch,
     ) -> Result<Type, Error> {
         match &branch.pattern {
             Pattern::Int { .. } | Pattern::Wildcard { .. } => {
-                self.infer_expr(local_variables, type_variables, type_set, &branch.rhs)
+                self.infer_expr(local_variables, type_variables, &branch.rhs)
             }
             Pattern::Var { .. } => todo!(),
             Pattern::Constructor { name, args, .. } => {
@@ -633,7 +596,7 @@ impl Typechecker {
                         return Err(Error::UnknownConstructor(branch.loc(), name.to_string()));
                     }
                     Some((loc, ty)) => {
-                        self.assert_type_eq(type_variables, type_set, &target_type, &ty, *loc)?;
+                        self.assert_type_eq(type_variables, &target_type, &ty, *loc)?;
                         ty
                     }
                 };
@@ -663,7 +626,7 @@ impl Typechecker {
                 let local_variables = local_variables.extend(new_vars);
 
                 // Infer the rhs
-                self.infer_expr(&local_variables, type_variables, type_set, &branch.rhs)
+                self.infer_expr(&local_variables, type_variables, &branch.rhs)
             }
         }
     }
@@ -713,7 +676,6 @@ impl Typechecker {
     fn assert_type_eq<'a>(
         &self,
         type_variables: &mut TypeVariables,
-        type_set: &mut TypeEqualitySet,
         expected: &'a Type,
         actual: &'a Type,
         loc: Loc,
@@ -726,23 +688,16 @@ impl Typechecker {
         // If the application heads match, try to equate their arguments
         match (expected, actual) {
             (Type::Var(expected_var), Type::Var(actual_var)) => {
-                self.assert_var_eq(type_variables, type_set, expected_var, actual_var, loc)
+                self.assert_var_eq(type_variables, expected_var, actual_var, loc)
             }
             (Type::Var(expected_var), actual) => {
-                self.try_solve_type_var(
-                    type_variables,
-                    type_set,
-                    expected_var,
-                    actual,
-                    loc,
-                    false,
-                )?;
+                self.try_solve_type_var(type_variables, expected_var, actual, loc, false)?;
                 Ok(())
             }
             (expected, Type::Var(actual_var)) => {
                 // TODO: since expected and actual are swapped here, we get an error message with
                 // swapped "expected" and "actual" fields. Fix this.
-                self.try_solve_type_var(type_variables, type_set, actual_var, expected, loc, true)?;
+                self.try_solve_type_var(type_variables, actual_var, expected, loc, true)?;
                 Ok(())
             }
             (Type::Int, _) | (_, Type::Int) => Err(Error::ExpectedType {
@@ -770,12 +725,12 @@ impl Typechecker {
                     args: args_actual,
                 },
             ) => {
-                self.assert_type_eq(type_variables, type_set, head_expected, head_actual, loc)?;
+                self.assert_type_eq(type_variables, head_expected, head_actual, loc)?;
 
                 assert_eq!(args_expected.len(), args_actual.len());
 
                 for (arg_expected, arg_actual) in args_expected.iter().zip(args_actual.iter()) {
-                    self.assert_type_eq(type_variables, type_set, arg_expected, arg_actual, loc)?;
+                    self.assert_type_eq(type_variables, arg_expected, arg_actual, loc)?;
                 }
 
                 Ok(())
@@ -791,8 +746,8 @@ impl Typechecker {
                 actual: actual.clone(),
             }),
             (Type::Func(f_expected, x_expected), Type::Func(f_actual, x_actual)) => {
-                self.assert_type_eq(type_variables, type_set, f_expected, f_actual, loc)?;
-                self.assert_type_eq(type_variables, type_set, x_expected, x_actual, loc)?;
+                self.assert_type_eq(type_variables, f_expected, f_actual, loc)?;
+                self.assert_type_eq(type_variables, x_expected, x_actual, loc)?;
                 Ok(())
             }
             (Type::Func(_, _), _) => Err(Error::ExpectedType {
@@ -811,7 +766,6 @@ impl Typechecker {
     fn assert_var_eq(
         &self,
         type_variables: &mut TypeVariables,
-        type_set: &mut TypeEqualitySet,
         expected: &str,
         actual: &str,
         loc: Loc,
@@ -835,7 +789,6 @@ impl Typechecker {
                                 let actual = actual.clone();
                                 self.try_solve_type_var(
                                     type_variables,
-                                    type_set,
                                     expected,
                                     &actual,
                                     loc,
@@ -844,7 +797,7 @@ impl Typechecker {
                                 Ok(())
                             }
                             VarState::Poly => {
-                                self.assert_var_eq(type_variables, type_set, actual, expected, loc)
+                                self.assert_var_eq(type_variables, actual, expected, loc)
                             }
                         }
                     }
@@ -854,7 +807,7 @@ impl Typechecker {
             Some(VarState::Solved(expected)) => {
                 // expected is solved to some type, so recurse
                 let expected = expected.clone();
-                self.try_solve_type_var(type_variables, type_set, actual, &expected, loc, false)?;
+                self.try_solve_type_var(type_variables, actual, &expected, loc, false)?;
                 Ok(())
             }
             Some(VarState::Poly) => match type_variables.get_mut(actual) {
@@ -870,7 +823,7 @@ impl Typechecker {
                         Ok(())
                     }
                 },
-                _ => self.assert_var_eq(type_variables, type_set, actual, expected, loc),
+                _ => self.assert_var_eq(type_variables, actual, expected, loc),
             },
             None => todo!(),
         }
@@ -880,7 +833,6 @@ impl Typechecker {
     fn try_solve_type_var(
         &self,
         type_variables: &mut TypeVariables,
-        type_set: &mut TypeEqualitySet,
         expected: &str,
         actual: &Type,
         loc: Loc,
@@ -891,7 +843,7 @@ impl Typechecker {
         // First, lookup expected to see if we've already solved it.
         if let Some(VarState::Solved(t)) = type_variables.get(expected) {
             let t = t.clone();
-            self.assert_type_eq(type_variables, type_set, &t, actual, loc)?;
+            self.assert_type_eq(type_variables, &t, actual, loc)?;
             return Ok(false);
         }
 

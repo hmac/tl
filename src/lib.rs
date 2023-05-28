@@ -1,12 +1,11 @@
 pub mod ast;
-pub mod parser;
-pub mod typechecker;
 pub mod interpreter;
 mod local_variables;
-mod union_find;
+pub mod parser;
+pub mod typechecker;
 
-use std::io::Write;
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use ast::Decl;
@@ -17,7 +16,7 @@ pub enum Error {
     Parse,
     Type,
     Eval,
-    IO(io::Error)
+    IO(io::Error),
 }
 
 impl From<io::Error> for Error {
@@ -31,7 +30,7 @@ pub struct Runner<'a> {
     source: String,
     ast: Vec<Decl>,
     interpreter: Interpreter,
-    output: Box<dyn Write + 'a>
+    output: Box<dyn Write + 'a>,
 }
 
 impl<'a> Runner<'a> {
@@ -42,7 +41,6 @@ impl<'a> Runner<'a> {
     }
 
     pub fn new<W: Write + 'a>(path: &Path, source: String, mut output: W) -> Result<Self, Error> {
-
         let mut parser = parser::Parser::new(source.clone());
         match parser.parse() {
             Ok(ast) => {
@@ -56,7 +54,9 @@ impl<'a> Runner<'a> {
                             constructors,
                             loc,
                         } => {
-                            if let Err(error) = typechecker.register_type(&name, &params, &constructors, *loc) {
+                            if let Err(error) =
+                                typechecker.register_type(&name, &params, &constructors, *loc)
+                            {
                                 writeln!(output, "Error:\n")?;
                                 ast::print_error(&mut output, &source, error);
                                 return Err(Error::Type);
@@ -101,9 +101,8 @@ impl<'a> Runner<'a> {
                     source,
                     ast,
                     interpreter,
-                    output: Box::new(output)
+                    output: Box::new(output),
                 })
-
             }
             Err(error) => {
                 writeln!(output, "Error:\n")?;
@@ -111,19 +110,19 @@ impl<'a> Runner<'a> {
                 return Err(Error::Parse);
             }
         }
-
     }
 
     pub fn run(&mut self, func_name: &str) -> Result<interpreter::Value, Error> {
-        let func = &self.ast.iter().find_map(|decl| {
-            match decl {
-                Decl::Func { name, body, .. } if name == func_name => Some(body),
-                _ => None
-            }
+        let func = &self.ast.iter().find_map(|decl| match decl {
+            Decl::Func { name, body, .. } if name == func_name => Some(body),
+            _ => None,
         });
         match func {
             Some(func_body) => {
-                match self.interpreter.eval(&local_variables::LocalVariables::new(), func_body) {
+                match self
+                    .interpreter
+                    .eval(&local_variables::LocalVariables::new(), func_body)
+                {
                     Ok(value) => Ok(value),
                     Err(error) => {
                         writeln!(&mut self.output, "Error:\n")?;
