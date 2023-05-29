@@ -3,6 +3,7 @@
 fn fixtures() {
     let type_error_fixtures = std::fs::read_dir("fixtures/type_errors").unwrap();
     let interpreter_fixtures = std::fs::read_dir("fixtures/interpreter").unwrap();
+    let test_fixtures = std::fs::read_dir("fixtures/tests").unwrap();
 
     let mut failures: Vec<(std::path::PathBuf, String)> = vec![];
 
@@ -46,6 +47,36 @@ fn fixtures() {
             println!("{}:\n{error}", path.display());
         }
         println!("{} failures.", failures.len());
+        panic!();
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn tests() {
+    let test_fixtures = std::fs::read_dir("fixtures/tests").unwrap();
+
+    let mut num_failures = 0;
+
+    let mut output_writer = vec![];
+
+    for entry in test_fixtures {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        println!("Analyzing {}", path.display());
+
+        let file_contents = std::fs::read_to_string(&path).unwrap();
+
+        num_failures += {
+            let runner = tl::Runner::new(&path, file_contents.to_string(), &mut output_writer);
+            runner.and_then(|mut r| r.run_tests())
+        }
+        .unwrap();
+    }
+
+    if num_failures > 0 {
+        println!("{}", String::from_utf8(output_writer).unwrap());
+        println!("{} failures.", num_failures);
         panic!();
     }
 }

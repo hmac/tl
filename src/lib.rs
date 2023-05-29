@@ -155,7 +155,9 @@ impl<'a> Runner<'a> {
         }
     }
 
-    pub fn run_tests(&mut self) -> Result<(), Error> {
+    pub fn run_tests(&mut self) -> Result<usize, Error> {
+        let mut failures = 0;
+
         for decl in &self.ast {
             match decl {
                 Decl::Test { name, body, .. } => {
@@ -168,6 +170,7 @@ impl<'a> Runner<'a> {
                         }
                         Ok(interpreter::Value::Bool(false)) => {
                             writeln!(&mut self.output, "{name}: FAIL\n")?;
+                            failures += 1;
                         }
                         Ok(r) => {
                             panic!("Unexpected result from test {name}: {r}");
@@ -180,6 +183,6 @@ impl<'a> Runner<'a> {
                 _ => {}
             }
         }
-        Ok(())
+        Ok(failures)
     }
 }
