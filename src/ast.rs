@@ -23,7 +23,7 @@ fn string_index_to_line_col_number(
     if let Some(i) = newline_indices.last() {
         if string_index > *i {
             // The location is on the last line
-            line = Some(newline_indices.len() - 1);
+            line = Some(newline_indices.len());
             line_index = Some(*i);
         }
     }
@@ -32,12 +32,12 @@ fn string_index_to_line_col_number(
         let i = i_j[0];
         let j = i_j[1];
         if i <= string_index && string_index <= j {
-            line = Some(n);
+            line = Some(n + 1);
             line_index = Some(i);
         }
     }
 
-    let mut line = line.unwrap_or(0);
+    let line = line.unwrap_or(0);
     let line_index = line_index.unwrap_or(0);
 
     // the column position in the line
@@ -47,13 +47,7 @@ fn string_index_to_line_col_number(
         string_index - line_index
     };
 
-    if line == 0 {
-        line = 1;
-    } else {
-        line += 2;
-    }
-
-    (line, col)
+    (line + 1, col)
 }
 
 // Print the line before the error location,
@@ -175,6 +169,7 @@ pub enum SourceType {
     Named(Loc, String),
     Func(Loc, Box<SourceType>, Box<SourceType>),
     Int(Loc),
+    Bool(Loc),
     App {
         loc: Loc,
         head: Box<SourceType>,
@@ -189,6 +184,7 @@ impl HasLoc for SourceType {
             Self::Named(loc, _) => *loc,
             Self::Func(loc, _, _) => *loc,
             Self::Int(loc) => *loc,
+            Self::Bool(loc) => *loc,
             Self::App { loc, .. } => *loc,
             Self::Var(loc, _) => *loc,
         }
@@ -201,6 +197,7 @@ pub enum Type {
     Named(String),
     Func(Box<Type>, Box<Type>),
     Int,
+    Bool,
     App { head: Box<Type>, args: Vec<Type> },
     Var(String),
 }
@@ -214,7 +211,7 @@ impl std::fmt::Display for Type {
 impl Type {
     pub fn vars(&self) -> Vec<String> {
         match self {
-            Type::Named(_) | Type::Int => vec![],
+            Type::Named(_) | Type::Int | Type::Bool => vec![],
             Type::Func(f, x) => {
                 let mut vars = f.vars();
                 vars.append(&mut x.vars());
@@ -263,6 +260,7 @@ impl Type {
                 }
             },
             Type::Int => write!(f, "Int"),
+            Type::Bool => write!(f, "Bool"),
             Type::App { head, args } => match context {
                 TypeFormatContext::Neutral | TypeFormatContext::AppLeft => {
                     (*head).fmt_with_context(f, TypeFormatContext::AppLeft)?;
@@ -283,12 +281,11 @@ impl Type {
 
     pub fn rename_vars(&mut self, substitution: &HashMap<String, String>) {
         match self {
-            Type::Named(_) => {}
+            Type::Named(_) | Type::Int | Type::Bool => {}
             Type::Func(f, x) => {
                 f.rename_vars(substitution);
                 x.rename_vars(substitution);
             }
-            Type::Int => {}
             Type::App { head, args } => {
                 head.rename_vars(substitution);
                 for arg in args {
@@ -456,6 +453,7 @@ impl Type {
                 Self::Func(Box::new(f), Box::new(x))
             }
             SourceType::Int(_) => Type::Int,
+            SourceType::Bool(_) => Type::Bool,
             SourceType::App { head, args, .. } => {
                 let head = Type::from_source_type(head);
                 let args = args.iter().map(|arg| Type::from_source_type(arg)).collect();

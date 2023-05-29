@@ -166,8 +166,13 @@ pub struct Typechecker {
 
 impl Typechecker {
     pub fn new() -> Self {
+        let mut constructors = HashMap::new();
+        // Insert the constructors for Bool, which is a built-in type.
+        // The locations are fake.
+        constructors.insert("True".to_string(), ((0, 0), Type::Bool));
+        constructors.insert("False".to_string(), ((0, 0), Type::Bool));
         Self {
-            constructors: HashMap::new(),
+            constructors,
             types: HashSet::new(),
             functions: HashMap::new(),
         }
@@ -700,11 +705,13 @@ impl Typechecker {
                 self.try_solve_type_var(type_variables, actual_var, expected, loc, true)?;
                 Ok(())
             }
-            (Type::Int, _) | (_, Type::Int) => Err(Error::ExpectedType {
-                loc,
-                expected: expected.clone(),
-                actual: actual.clone(),
-            }),
+            (Type::Int, _) | (_, Type::Int) | (Type::Bool, _) | (_, Type::Bool) => {
+                Err(Error::ExpectedType {
+                    loc,
+                    expected: expected.clone(),
+                    actual: actual.clone(),
+                })
+            }
             (Type::Named(_), _) => Err(Error::ExpectedType {
                 loc,
                 expected: expected.clone(),
@@ -927,7 +934,7 @@ impl Typechecker {
                 self.check_type(f, loc)?;
                 self.check_type(x, loc)?;
             }
-            Type::Int => {}
+            Type::Int | Type::Bool => {}
             Type::App { head, args } => {
                 self.check_type(head, loc)?;
                 for arg in args {

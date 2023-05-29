@@ -1,5 +1,3 @@
-type Bool { True, False }
-
 type Dir { Left, Right }
 
 foo : Bool -> Bool {
@@ -12,7 +10,7 @@ foo : Bool -> Bool {
 ---
 Error:
 
-   7:     // This constructor does not have the same type as the target
-   8:     Left -> True,
+   5:     // This constructor does not have the same type as the target
+   6:     Left -> True,
           ^^^^^
            expected this to have the type Bool, but it actually has the type Dir

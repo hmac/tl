@@ -1,9 +1,10 @@
 #[cfg(test)]
-
 #[test]
 fn fixtures() {
     let type_error_fixtures = std::fs::read_dir("fixtures/type_errors").unwrap();
     let interpreter_fixtures = std::fs::read_dir("fixtures/interpreter").unwrap();
+
+    let mut failures: Vec<(std::path::PathBuf, String)> = vec![];
 
     for entry in type_error_fixtures.chain(interpreter_fixtures) {
         let entry = entry.unwrap();
@@ -28,14 +29,23 @@ fn fixtures() {
 
         let actual_output = String::from_utf8(output_writer).unwrap();
 
-        let expected_output = expected_output.trim_start_matches('\n').trim_end_matches('\n');
-        let actual_output = actual_output.trim_start_matches('\n').trim_end_matches('\n');
+        let expected_output = expected_output
+            .trim_start_matches('\n')
+            .trim_end_matches('\n');
+        let actual_output = actual_output
+            .trim_start_matches('\n')
+            .trim_end_matches('\n');
 
         if expected_output != actual_output {
-            println!("Test case failed. Input:\n\n{}\n", input);
-            println!("Expected output:\n\n{}\n\nActual output:\n\n{}",
-                     expected_output, actual_output);
-            panic!();
+            failures.push((path, format!("Test case failed. Input:\n\n{input}\n\nExpected output:\n\n{expected_output}\n\nActual output:\n\n{actual_output}")));
         }
+    }
+
+    if !failures.is_empty() {
+        for (path, error) in &failures {
+            println!("{}:\n{error}", path.display());
+        }
+        println!("{} failures.", failures.len());
+        panic!();
     }
 }

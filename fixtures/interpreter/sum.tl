@@ -1,5 +1,3 @@
-type Bool { True, False }
-
 iszero : Int -> Bool {
   n -> match n {
     0 -> True,

@@ -60,8 +60,6 @@ non_empty_list : a -> List a -> NonEmptyList a {
   x l -> NonEmptyList x l
 }
 
-type Bool { True, False }
-
 all : (a -> Bool) -> NonEmptyList a -> Bool {
   p l -> fold_ne (a b -> and (p a) b) True l
 }

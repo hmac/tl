@@ -69,6 +69,7 @@ impl<'a> Runner<'a> {
                         }
                         Decl::Test { .. } => {
                             // TODO: typecheck test functions
+                            // Test functions are required to have type Bool
                         }
                     }
                 }

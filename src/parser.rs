@@ -274,11 +274,11 @@ impl Parser {
             let loc = self.loc;
             if self.input().starts_with(upper_ident_char) {
                 let type_name = self.parse_upper_ident()?;
-                if type_name == "Int" {
-                    Ok(SourceType::Int((loc, self.loc)))
-                } else {
-                    Ok(SourceType::Named((loc, self.loc), type_name))
-                }
+                Ok(match type_name.as_str() {
+                    "Int" => SourceType::Int((loc, self.loc)),
+                    "Bool" => SourceType::Bool((loc, self.loc)),
+                    _ => SourceType::Named((loc, self.loc), type_name),
+                })
             } else {
                 let type_var = self.parse_lower_ident()?;
                 Ok(SourceType::Var((loc, self.loc), type_var))

@@ -1,4 +1,6 @@
 type Foo { MkFoo a }
+
+main : Int { 4 }
 ---
 Error:
 
