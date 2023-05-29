@@ -228,9 +228,9 @@ impl Typechecker {
     pub fn check_func(&self, func: &Expr, expected_type: &SourceType) -> Result<(), Error> {
         let mut type_variables = HashMap::new();
         let ty = Type::from_source_type(expected_type);
-        // TODO: the type variables found here should NOT be unified with concrete types, as they
+        // The type variables found here should NOT be unified with concrete types, as they
         // are part of the function's signature and so should remain polymorphic.
-        // How do we record that?
+        // We indicate this by setting their VarState to Poly.
         for var in ty.vars() {
             type_variables.insert(var, VarState::Poly);
         }
