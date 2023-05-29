@@ -3,7 +3,6 @@
 fn fixtures() {
     let type_error_fixtures = std::fs::read_dir("fixtures/type_errors").unwrap();
     let interpreter_fixtures = std::fs::read_dir("fixtures/interpreter").unwrap();
-    let test_fixtures = std::fs::read_dir("fixtures/tests").unwrap();
 
     let mut failures: Vec<(std::path::PathBuf, String)> = vec![];
 

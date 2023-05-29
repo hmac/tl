@@ -3,6 +3,8 @@ use std::collections::{HashMap, VecDeque};
 use crate::ast::*;
 use crate::local_variables::LocalVariables;
 
+use tracing::debug;
+
 const TYPE_INT: Type = Type::Int;
 
 #[derive(Debug)]
@@ -304,7 +306,7 @@ impl Typechecker {
         expr: &Expr,
         expected_type: &Type,
     ) -> Result<(), Error> {
-        eprintln!("check_expr({:?}, {})", expr, expected_type);
+        debug!("check_expr({:?}, {})", expr, expected_type);
         match expr {
             Expr::Int(loc, _) => {
                 self.assert_type_eq(type_variables, expected_type, &TYPE_INT, *loc)
@@ -709,7 +711,7 @@ impl Typechecker {
         actual: &'a Type,
         loc: Loc,
     ) -> Result<(), Error> {
-        eprintln!("assert_type_eq({}, {})", &expected, &actual);
+        debug!("assert_type_eq({}, {})", &expected, &actual);
         if expected == actual {
             return Ok(());
         }
@@ -791,7 +793,7 @@ impl Typechecker {
         actual: &str,
         loc: Loc,
     ) -> Result<(), Error> {
-        eprintln!("assert_var_eq({}, {})", expected, actual);
+        debug!("assert_var_eq({}, {})", expected, actual);
         let expected_var = type_variables.get(expected);
         match expected_var {
             Some(VarState::Unsolved) => {
@@ -801,7 +803,7 @@ impl Typechecker {
                             VarState::Unsolved => {
                                 // expected and actual are both unsolved,
                                 // so set them equal to each other
-                                eprintln!("solve: {} = {}", expected, actual);
+                                debug!("solve: {} = {}", expected, actual);
                                 *actual_var = VarState::Solved(Type::Var(expected.to_string()));
                                 Ok(())
                             }
@@ -859,7 +861,7 @@ impl Typechecker {
         loc: Loc,
         swapped: bool,
     ) -> Result<bool, Error> {
-        eprintln!("try_solve_type_var({}, {})", &expected, &actual);
+        debug!("try_solve_type_var({}, {})", &expected, &actual);
 
         // First, lookup expected to see if we've already solved it.
         if let Some(VarState::Solved(t)) = type_variables.get(expected) {
@@ -882,7 +884,7 @@ impl Typechecker {
             });
         }
 
-        eprintln!("solve: {} = {}", &expected, &actual);
+        debug!("solve: {} = {}", &expected, &actual);
         match type_variables.get_mut(expected) {
             None => {
                 unreachable!();
@@ -894,7 +896,7 @@ impl Typechecker {
                         Ok(true)
                     }
                     VarState::Solved(t) => {
-                        eprintln!("lookup: {} = {}", &expected, &t);
+                        debug!("lookup: {} = {}", &expected, &t);
                         if t == actual {
                             Ok(true)
                         } else {

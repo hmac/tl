@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use tracing_subscriber;
+
 const USAGE: &'static str = "
 Usage:
   tl run <PATH> <FUNC>
@@ -13,6 +15,8 @@ Usage:
 ";
 
 fn main() {
+    tracing_subscriber::fmt::init();
+
     let mut args = std::env::args();
     args.next(); // skip program name
 

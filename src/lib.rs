@@ -91,7 +91,6 @@ impl<'a> Runner<'a> {
                                 typechecker.check_func(&body, &ast::SourceType::Bool((0, 0)))
                             {
                                 writeln!(output, "Error in test {name}:\n")?;
-                                dbg!(&error);
                                 ast::print_error(&mut output, &parser.into_input(), error);
                                 return Err(Error::Type);
                             }

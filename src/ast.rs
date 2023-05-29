@@ -67,8 +67,8 @@ pub fn print_error<E: std::fmt::Display + HasLoc, W: std::io::Write>(
 ) {
     let (start, end) = error.loc();
     let newlines = calculate_lines(orig);
-    let (start_line, start_col) = dbg!(string_index_to_line_col_number(start, &newlines));
-    let (end_line, mut end_col) = dbg!(string_index_to_line_col_number(end, &newlines));
+    let (start_line, start_col) = string_index_to_line_col_number(start, &newlines);
+    let (end_line, mut end_col) = string_index_to_line_col_number(end, &newlines);
     let mut source_lines = orig.split('\n');
 
     // We don't yet know how to print errors that span multiple lines.
