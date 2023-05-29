@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 use crate::ast::*;
 use crate::local_variables::LocalVariables;
@@ -28,7 +28,7 @@ pub enum Error {
         actual_type: Type,
     },
     DuplicateConstructor {
-        existing: (Loc, Type),
+        existing: (String, Loc, Type),
         duplicate: TypeConstructor,
     },
     CannotApplyNonFunction {
@@ -159,21 +159,28 @@ enum VarState {
 }
 
 pub struct Typechecker {
-    constructors: HashMap<String, (Loc, Type)>,
-    types: HashSet<String>,
+    // constructor name => (type name, location, constructor type)
+    constructors: HashMap<String, (String, Loc, Type)>,
+    // type name => type parameters
+    types: HashMap<String, Vec<String>>,
     functions: HashMap<String, (Loc, Type)>,
 }
 
 impl Typechecker {
     pub fn new() -> Self {
+        let mut types = HashMap::new();
         let mut constructors = HashMap::new();
+        types.insert("Bool".to_string(), vec![]);
         // Insert the constructors for Bool, which is a built-in type.
         // The locations are fake.
-        constructors.insert("True".to_string(), ((0, 0), Type::Bool));
-        constructors.insert("False".to_string(), ((0, 0), Type::Bool));
+        constructors.insert("True".to_string(), ("Bool".to_string(), (0, 0), Type::Bool));
+        constructors.insert(
+            "False".to_string(),
+            ("Bool".to_string(), (0, 0), Type::Bool),
+        );
         Self {
             constructors,
-            types: HashSet::new(),
+            types,
             functions: HashMap::new(),
         }
     }
@@ -186,20 +193,22 @@ impl Typechecker {
         loc: Loc,
     ) -> Result<(), Error> {
         // Check that type name is not already in use
-        if self.types.contains(name) {
+        if self.types.contains_key(name) {
             return Err(Error::TypeAlreadyDefined(loc, name.to_string()));
         }
 
         // Check that constructors are well-formed
-        self.types.insert(name.to_string());
+        self.types.insert(name.to_string(), params.to_owned());
         for ctor in constructors {
             let ctor_type = make_constructor_type(&name, params, &ctor);
             // Note: we don't check the type now.
             // That happens later, see `check_all_types`.
             match self.constructors.get(&ctor.name.to_string()) {
                 None => {
-                    self.constructors
-                        .insert(ctor.name.to_string(), (ctor.loc(), ctor_type));
+                    self.constructors.insert(
+                        ctor.name.to_string(),
+                        (name.to_string(), ctor.loc(), ctor_type),
+                    );
                 }
                 Some(existing_ctor) => {
                     return Err(Error::DuplicateConstructor {
@@ -615,7 +624,7 @@ impl Typechecker {
                     None => {
                         return Err(Error::UnknownConstructor(branch.loc(), name.to_string()));
                     }
-                    Some((loc, ty)) => {
+                    Some((_, loc, ty)) => {
                         self.assert_type_eq(type_variables, &target_type, &ty, *loc)?;
                         ty
                     }
@@ -682,7 +691,7 @@ impl Typechecker {
     ) -> Result<Type, Error> {
         match self.constructors.get(name) {
             None => Err(Error::UnknownConstructor(loc, name.to_string())),
-            Some((_, ty)) => {
+            Some((_, _, ty)) => {
                 // This constructor type may have type variables that we must instantiate.
                 let (ty, vars) = self.generate_fresh_type_variables(ty.clone(), type_variables);
                 for var in vars {
@@ -931,33 +940,42 @@ impl Typechecker {
     /// We do this after registering, so that circular references are allowed.
     /// If we check each type up-front, we have to register them in reverse dependency order.
     pub fn check_all_types(&self) -> Result<(), Error> {
-        for (loc, ctor_type) in self.constructors.values() {
-            self.check_type(ctor_type, *loc)?;
+        for (type_name, loc, ctor_type) in self.constructors.values() {
+            match self.types.get(type_name) {
+                Some(type_params) => {
+                    self.check_type(ctor_type, *loc, type_params)?;
+                }
+                None => {
+                    return Err(Error::UnknownType(*loc, type_name.to_string()));
+                }
+            }
         }
         Ok(())
     }
 
-    pub fn check_type(&self, ty: &Type, loc: Loc) -> Result<(), Error> {
+    pub fn check_type(&self, ty: &Type, loc: Loc, vars_in_scope: &[String]) -> Result<(), Error> {
         // Check that all mentioned types exist.
         match ty {
             Type::Named(n) => {
-                if !self.types.contains(n) {
+                if !self.types.contains_key(n) {
                     return Err(Error::UnknownType(loc, n.to_string()));
                 }
             }
             Type::Func(f, x) => {
-                self.check_type(f, loc)?;
-                self.check_type(x, loc)?;
+                self.check_type(f, loc, vars_in_scope)?;
+                self.check_type(x, loc, vars_in_scope)?;
             }
             Type::Int | Type::Bool => {}
             Type::App { head, args } => {
-                self.check_type(head, loc)?;
+                self.check_type(head, loc, vars_in_scope)?;
                 for arg in args {
-                    self.check_type(arg, loc)?;
+                    self.check_type(arg, loc, vars_in_scope)?;
                 }
             }
-            Type::Var(_) => {
-                // TODO:Not sure if we have to check anything here
+            Type::Var(v) => {
+                if !vars_in_scope.contains(v) {
+                    return Err(Error::UnknownVariable(loc, v.to_string()));
+                }
             }
         }
         Ok(())

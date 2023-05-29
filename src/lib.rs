@@ -71,7 +71,11 @@ impl<'a> Runner<'a> {
                     }
                 }
 
-                typechecker.check_all_types().unwrap();
+                if let Err(error) = typechecker.check_all_types() {
+                    writeln!(output, "Error:\n")?;
+                    ast::print_error(&mut output, &parser.into_input(), error);
+                    return Err(Error::Type);
+                }
 
                 for decl in &ast {
                     match decl {
