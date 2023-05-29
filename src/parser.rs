@@ -664,6 +664,10 @@ impl Parser {
             '+' => Operator::Add,
             '-' => Operator::Sub,
             '*' => Operator::Mul,
+            '=' => match self.eat_char()? {
+                '=' => Operator::Eq,
+                _ => return Err(Error::ExpectedOperator((self.loc - 2, self.loc - 1))),
+            },
             _ => {
                 return Err(Error::ExpectedOperator((self.loc - 1, self.loc - 1)));
             }
@@ -758,7 +762,7 @@ fn numeric_char(c: char) -> bool {
 }
 
 fn operator_char(c: char) -> bool {
-    c == '+' || c == '-' || c == '*'
+    c == '+' || c == '-' || c == '*' || c == '='
 }
 
 #[derive(Debug)]

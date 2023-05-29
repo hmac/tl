@@ -578,6 +578,21 @@ impl Typechecker {
                     Box::new(Type::Int),
                     Box::new(Type::Func(Box::new(Type::Int), Box::new(Type::Int))),
                 )),
+                Operator::Eq => {
+                    // eq : a -> a -> Bool
+                    let ty = Type::Func(
+                        Box::new(Type::Var("a".to_string())),
+                        Box::new(Type::Func(
+                            Box::new(Type::Var("a".to_string())),
+                            Box::new(Type::Bool),
+                        )),
+                    );
+                    let (ty, vars) = self.generate_fresh_type_variables(ty, type_variables);
+                    for var in vars {
+                        type_variables.insert(var, VarState::Unsolved);
+                    }
+                    Ok(ty)
+                }
             },
         }
     }
@@ -647,7 +662,7 @@ impl Typechecker {
             Some(ty) => Ok(ty.clone()),
             None => match self.functions.get(name) {
                 Some((_, ty)) => {
-                    // This function type may have type varaibles that we must instantiate.
+                    // This function type may have type variables that we must instantiate.
                     let (ty, vars) = self.generate_fresh_type_variables(ty.clone(), type_variables);
                     for var in vars {
                         type_variables.insert(var, VarState::Unsolved);

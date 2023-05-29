@@ -159,12 +159,17 @@ impl<'a> Runner<'a> {
                         .interpreter
                         .eval(&local_variables::LocalVariables::new(), &body)
                     {
-                        Ok(_) => {
+                        Ok(interpreter::Value::Bool(true)) => {
                             writeln!(&mut self.output, "{name}: PASS\n")?;
                         }
-                        Err(error) => {
+                        Ok(interpreter::Value::Bool(false)) => {
                             writeln!(&mut self.output, "{name}: FAIL\n")?;
-                            writeln!(&mut self.output, "{:?}", error)?;
+                        }
+                        Ok(r) => {
+                            panic!("Unexpected result from test {name}: {r}");
+                        }
+                        Err(error) => {
+                            panic!("Error running test {name}: {error:?}");
                         }
                     }
                 }
