@@ -129,6 +129,23 @@ impl Interpreter {
                         }
                         Err(Error::NoMatchingBranch)
                     }
+                    Value::Bool(b) => {
+                        // Find a branch that matches b
+                        for branch in branches {
+                            match &branch.pattern {
+                                Pattern::Constructor { name, .. }
+                                    if (b && name == "True") || (!b && name == "False") =>
+                                {
+                                    return self.eval(locals, &branch.rhs);
+                                }
+                                Pattern::Wildcard { .. } => {
+                                    return self.eval(locals, &branch.rhs);
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(Error::NoMatchingBranch)
+                    }
                     Value::Constructor { name, applied_args } => {
                         // Find a branch that matches the constructor name
                         for branch in branches {

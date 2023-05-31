@@ -66,11 +66,16 @@ fn tests() {
 
         let file_contents = std::fs::read_to_string(&path).unwrap();
 
-        num_failures += {
-            let runner = tl::Runner::new(&path, file_contents.to_string(), &mut output_writer);
-            runner.and_then(|mut r| r.run_tests())
+        let runner = tl::Runner::new(&path, file_contents.to_string(), &mut output_writer);
+        match runner {
+            Ok(mut runner) => {
+                num_failures += runner.run_tests().unwrap();
+            }
+            Err(_) => {
+                std::mem::drop(runner);
+                panic!("Error:\n{}", String::from_utf8(output_writer).unwrap());
+            }
         }
-        .unwrap();
     }
 
     if num_failures > 0 {

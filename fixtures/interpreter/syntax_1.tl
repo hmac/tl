@@ -1,7 +1,5 @@
 // Basic types and functions
 
-type Bool { True, False }
-
 type Pair a { MkPair a a }
 
 f : Int -> Int -> Int { x y -> + x y }
@@ -45,3 +43,5 @@ and : Bool -> Bool -> Bool {
     False -> False
   }
 }
+---
+MkPair True False
