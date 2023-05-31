@@ -1,5 +1,5 @@
 use crate::ast::{
-    Decl, Expr, HasLoc, Loc, MatchBranch, Operator, Pattern, SourceType, TypeConstructor, Var,
+    CaseBranch, Decl, Expr, HasLoc, Loc, Operator, Pattern, SourceType, TypeConstructor, Var,
 };
 use std::collections::VecDeque;
 
@@ -382,8 +382,8 @@ impl Parser {
             let (loc, n) = self.parse_int()?;
             return Ok(Expr::Int(loc, n));
         }
-        if self.input().starts_with("match") {
-            return self.parse_match();
+        if self.input().starts_with("case") {
+            return self.parse_case();
         }
 
         // Otherwise, it's a function application or a function
@@ -468,8 +468,8 @@ impl Parser {
             let (loc, n) = self.parse_int()?;
             return Ok(Expr::Int(loc, n));
         }
-        if self.input().starts_with("match") {
-            return self.parse_match();
+        if self.input().starts_with("case") {
+            return self.parse_case();
         }
         if self.input().starts_with("(") {
             self.eat("(")?;
@@ -525,9 +525,9 @@ impl Parser {
         }
     }
 
-    fn parse_match(&mut self) -> Result<Expr, Error> {
+    fn parse_case(&mut self) -> Result<Expr, Error> {
         let loc = self.loc;
-        self.eat("match")?;
+        self.eat("case")?;
         self.trim();
         let target = self.parse_expr()?;
         self.trim();
@@ -546,21 +546,21 @@ impl Parser {
         }
         self.eat("}")?;
         self.trim();
-        Ok(Expr::Match {
+        Ok(Expr::Case {
             loc: (loc, self.loc),
             target: Box::new(target),
             branches,
         })
     }
 
-    fn parse_match_branch(&mut self) -> Result<MatchBranch, Error> {
+    fn parse_match_branch(&mut self) -> Result<CaseBranch, Error> {
         let loc = self.loc;
         let pattern = self.parse_pattern()?;
         self.trim();
         self.eat("->")?;
         self.trim();
         let rhs = self.parse_expr()?;
-        Ok(MatchBranch {
+        Ok(CaseBranch {
             loc: (loc, self.loc),
             pattern,
             rhs,

@@ -1,7 +1,7 @@
 type List a { Nil, Cons a (List a) }
 
 map : (a -> b) -> List a -> List b {
-  f l -> match l {
+  f l -> case l {
     Nil -> Nil,
     Cons x xs -> Cons (f x) (map f xs),
   }
@@ -13,7 +13,7 @@ test map {
 }
 
 foldl : (b -> a -> b) -> b -> List a -> b {
-  f z l -> match l {
+  f z l -> case l {
     Nil -> z,
     Cons x xs -> f (foldl f z xs) x
   }
@@ -25,7 +25,7 @@ test foldl {
 }
 
 filter : (a -> Bool) -> List a -> List a {
-  p l -> foldl (acc x -> match p x { True -> Cons x acc, False -> acc }) Nil l
+  p l -> foldl (acc x -> case p x { True -> Cons x acc, False -> acc }) Nil l
 }
 
 test filter {

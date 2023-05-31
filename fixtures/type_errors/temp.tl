@@ -3,14 +3,14 @@ type List a { Nil, Cons a (List a) }
 type List2 a { Nil2, Cons2 a (List2 a) }
 
 convert : List a -> List2 a {
-  l -> match l {
+  l -> case l {
     Nil -> Nil2,
     Cons x xs -> Cons2 x (convert xs)
   }
 }
 
 length : List a -> Int {
-  l -> match l {
+  l -> case l {
     Nil -> 0,
     Cons _ xs -> + 1 (length xs)
   }

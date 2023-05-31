@@ -1,5 +1,5 @@
 not : Bool -> Bool {
-  b -> match b {
+  b -> case b {
     True -> False,
     False -> True,
   }
@@ -11,7 +11,7 @@ type List a {
 }
 
 empty : List a -> Bool {
-  list -> match list {
+  list -> case list {
     Nil -> True,
     Cons x xs -> False
   }

@@ -313,10 +313,10 @@ impl Type {
 pub enum Expr {
     Var(Loc, Var),
     Int(Loc, i64),
-    Match {
+    Case {
         loc: Loc,
         target: Box<Expr>,
-        branches: Vec<MatchBranch>,
+        branches: Vec<CaseBranch>,
     },
     Func {
         loc: Loc,
@@ -335,7 +335,7 @@ impl HasLoc for Expr {
         match self {
             Self::Var(loc, _) => *loc,
             Self::Int(loc, _) => *loc,
-            Self::Match { loc, .. } => *loc,
+            Self::Case { loc, .. } => *loc,
             Self::Func { loc, .. } => *loc,
             Self::App { loc, .. } => *loc,
         }
@@ -343,13 +343,13 @@ impl HasLoc for Expr {
 }
 
 #[derive(Debug, Clone)]
-pub struct MatchBranch {
+pub struct CaseBranch {
     pub loc: Loc,
     pub pattern: Pattern,
     pub rhs: Expr,
 }
 
-impl HasLoc for MatchBranch {
+impl HasLoc for CaseBranch {
     fn loc(&self) -> Loc {
         self.loc
     }

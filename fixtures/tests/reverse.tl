@@ -5,7 +5,7 @@ reverse : List a -> List a {
 }
 
 reverse_ : List a -> List a -> List a {
-  l acc -> match l {
+  l acc -> case l {
     Nil -> acc,
     Cons x xs -> reverse_ xs (Cons x acc)
   }

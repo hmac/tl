@@ -19,7 +19,7 @@ pub enum Error {
         expected: Type,
         actual: Type,
     },
-    MatchBranchArgNumberMismatch {
+    CaseBranchArgNumberMismatch {
         loc: Loc,
         number_of_args_in_branch: usize,
         number_of_args_in_constructor_type: usize,
@@ -58,7 +58,7 @@ impl HasLoc for Error {
             Error::UnknownConstructor(loc, _) => *loc,
             Error::EmptyMatch(loc) => *loc,
             Error::ExpectedType { loc, .. } => *loc,
-            Error::MatchBranchArgNumberMismatch { loc, .. } => *loc,
+            Error::CaseBranchArgNumberMismatch { loc, .. } => *loc,
             Error::CannotInferTypeOfFunctions(loc) => *loc,
             Error::ExpectedFunctionType { loc, .. } => *loc,
             Error::DuplicateConstructor { duplicate, .. } => duplicate.loc,
@@ -92,7 +92,7 @@ impl std::fmt::Display for Error {
             } => {
                 write!(f, "expected this to have the type {expected}, but it actually has the type {actual}")
             }
-            Error::MatchBranchArgNumberMismatch {
+            Error::CaseBranchArgNumberMismatch {
                 number_of_args_in_branch,
                 number_of_args_in_constructor_type,
                 ..
@@ -315,7 +315,7 @@ impl Typechecker {
                 let ty = self.infer_var(local_variables, type_variables, v, *loc)?;
                 self.assert_type_eq(type_variables, expected_type, &ty, *loc)
             }
-            Expr::Match {
+            Expr::Case {
                 target,
                 branches,
                 loc,
@@ -427,7 +427,7 @@ impl Typechecker {
         match expr {
             Expr::Int(_, _) => Ok(TYPE_INT),
             Expr::Var(loc, v) => self.infer_var(local_variables, type_variables, v, *loc),
-            Expr::Match {
+            Expr::Case {
                 target,
                 branches,
                 loc,
@@ -507,7 +507,7 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
-        branches: &Vec<MatchBranch>,
+        branches: &Vec<CaseBranch>,
         target_type: &Type,
         result_type: &Type,
     ) -> Result<(), Error> {
@@ -556,8 +556,8 @@ impl Typechecker {
                 let ctor_ty_args = ctor_ty.func_args();
                 let num_args_in_ctor_type = ctor_ty_args.len() - 1; // last elem is the result type
                 if num_args_in_ctor_type != args.len() {
-                    // TODO: rename to MatchBranchPatternArgNumberMismatch
-                    return Err(Error::MatchBranchArgNumberMismatch {
+                    // TODO: rename to CaseBranchPatternArgNumberMismatch
+                    return Err(Error::CaseBranchArgNumberMismatch {
                         loc: *loc,
                         number_of_args_in_branch: args.len(),
                         number_of_args_in_constructor_type: num_args_in_ctor_type,
@@ -613,7 +613,7 @@ impl Typechecker {
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
         target_type: &Type,
-        branch: &MatchBranch,
+        branch: &CaseBranch,
     ) -> Result<Type, Error> {
         match &branch.pattern {
             Pattern::Int { .. } | Pattern::Wildcard { .. } => {
@@ -636,7 +636,7 @@ impl Typechecker {
                 let ctor_ty_args = ctor_ty.func_args();
                 let num_args_in_ctor_type = ctor_ty_args.len() - 1; // last elem is the result type
                 if num_args_in_ctor_type != args.len() {
-                    return Err(Error::MatchBranchArgNumberMismatch {
+                    return Err(Error::CaseBranchArgNumberMismatch {
                         loc: branch.loc(),
                         number_of_args_in_branch: args.len(),
                         number_of_args_in_constructor_type: num_args_in_ctor_type,

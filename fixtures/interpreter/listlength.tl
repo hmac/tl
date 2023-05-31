@@ -1,7 +1,7 @@
 type List { Nil, Cons Int List }
 
 length : List -> Int {
-  l -> match l {
+  l -> case l {
     Nil -> 0,
     Cons _ rest -> + (length rest) 1,
   }

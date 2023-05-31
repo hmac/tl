@@ -1,5 +1,5 @@
 not : Bool -> Bool {
-  b -> match b {
+  b -> case b {
     True -> False,
     False -> True
   }

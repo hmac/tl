@@ -12,7 +12,7 @@ main : Pair Bool {
 }
 
 not : Bool -> Bool {
-  b -> match b {
+  b -> case b {
     True -> False, // comment at end of line
     False -> True
   }
@@ -29,14 +29,14 @@ id : a -> a {
 }
 
 andpair : Pair Bool -> Bool {
-  p -> match p {
+  p -> case p {
     MkPair a b -> and a b
   }
 }
 
 and : Bool -> Bool -> Bool {
-  a b -> match a {
-    True -> match b {
+  a b -> case a {
+    True -> case b {
       True -> True,
       False -> False
     },

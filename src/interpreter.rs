@@ -106,7 +106,7 @@ impl Interpreter {
                     })
                 }
             }
-            Expr::Match {
+            Expr::Case {
                 target, branches, ..
             } => {
                 // Evaluate the target

@@ -13,7 +13,7 @@ _lead_underscore_func_123 : Int { 2 }
 lowercaseWithCapitals : Int { 3 }
 
 wildcard : _LeadingUnderscore -> _LeadingUnderscore {
-  l -> match l {
+  l -> case l {
     _In_The_Middle -> _AndAgain,
     _ -> In_The_Middle
   }

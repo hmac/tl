@@ -1,7 +1,7 @@
 // Test that Bool is recognised as a builtin type
 
 not : Bool -> Bool {
-  b -> match b {
+  b -> case b {
     True -> False,
     False -> True
   }
