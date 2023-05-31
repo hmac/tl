@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ast::{Expr, Operator, Pattern, TypeConstructor, Var};
+use crate::ast::{Expr, LetBinding, Operator, Pattern, TypeConstructor, Var};
 use crate::local_variables::LocalVariables;
 
 pub struct Interpreter {
@@ -169,6 +169,14 @@ impl Interpreter {
                 }
             }
             Expr::Var(_, v) => self.eval_var(locals, v),
+            Expr::Let { bindings, body, .. } => {
+                let mut new_locals = HashMap::new();
+                for LetBinding { name, value, .. } in bindings {
+                    let val = self.eval(&locals.extend(new_locals.clone()), &value)?;
+                    new_locals.insert(name.to_string(), val);
+                }
+                return self.eval(&locals.extend(new_locals), &body);
+            }
         }
     }
 

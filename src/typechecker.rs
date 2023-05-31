@@ -415,6 +415,25 @@ impl Typechecker {
                 self.assert_type_eq(type_variables, expected_type, &result_type, *loc)?;
                 Ok(())
             }
+            Expr::Let { bindings, body, .. } => {
+                let mut new_locals = HashMap::new();
+                // Infer each binding, and add to local variables
+                for LetBinding { name, value, .. } in bindings {
+                    let ty = self.infer_expr(
+                        &local_variables.extend(new_locals.clone()),
+                        type_variables,
+                        &value,
+                    )?;
+                    new_locals.insert(name.to_string(), ty);
+                }
+                // Check the body
+                self.check_expr(
+                    &local_variables.extend(new_locals),
+                    type_variables,
+                    &body,
+                    expected_type,
+                )
+            }
         }
     }
 
@@ -499,6 +518,20 @@ impl Typechecker {
                         });
                     }
                 }
+            }
+            Expr::Let { bindings, body, .. } => {
+                let mut new_locals = HashMap::new();
+                // Infer each binding, and add to local variables
+                for LetBinding { name, value, .. } in bindings {
+                    let ty = self.infer_expr(
+                        &local_variables.extend(new_locals.clone()),
+                        type_variables,
+                        &value,
+                    )?;
+                    new_locals.insert(name.to_string(), ty);
+                }
+                // Infer the body
+                self.infer_expr(&local_variables.extend(new_locals), type_variables, &body)
             }
         }
     }

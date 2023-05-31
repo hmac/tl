@@ -328,6 +328,11 @@ pub enum Expr {
         head: Box<Expr>,
         args: Vec<Expr>,
     },
+    Let {
+        loc: Loc,
+        bindings: Vec<LetBinding>,
+        body: Box<Expr>,
+    },
 }
 
 impl HasLoc for Expr {
@@ -338,8 +343,16 @@ impl HasLoc for Expr {
             Self::Case { loc, .. } => *loc,
             Self::Func { loc, .. } => *loc,
             Self::App { loc, .. } => *loc,
+            Self::Let { loc, .. } => *loc,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct LetBinding {
+    pub loc: Loc,
+    pub name: String,
+    pub value: Expr,
 }
 
 #[derive(Debug, Clone)]

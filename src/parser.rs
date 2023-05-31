@@ -1,5 +1,6 @@
 use crate::ast::{
-    CaseBranch, Decl, Expr, HasLoc, Loc, Operator, Pattern, SourceType, TypeConstructor, Var,
+    CaseBranch, Decl, Expr, HasLoc, LetBinding, Loc, Operator, Pattern, SourceType,
+    TypeConstructor, Var,
 };
 use std::collections::VecDeque;
 
@@ -385,6 +386,9 @@ impl Parser {
         if self.input().starts_with("case") {
             return self.parse_case();
         }
+        if self.input().starts_with("let") {
+            return self.parse_let();
+        }
 
         // Otherwise, it's a function application or a function
         // f x y
@@ -523,6 +527,44 @@ impl Parser {
         } else {
             return Err(Error::ExpectedLowerIdent((loc, self.loc)));
         }
+    }
+
+    fn parse_let(&mut self) -> Result<Expr, Error> {
+        let loc = self.loc;
+        self.eat("let")?;
+        self.trim();
+        let mut bindings = vec![];
+        loop {
+            if self.input().starts_with("{") {
+                break;
+            }
+            let loc = self.loc;
+            let name = self.parse_lower_ident()?;
+            self.trim();
+            self.eat("=")?;
+            self.trim();
+            let value = self.parse_expr()?;
+            bindings.push(LetBinding {
+                loc: (loc, self.loc),
+                name,
+                value,
+            });
+            self.trim();
+            self.try_eat(",");
+            self.trim();
+        }
+        self.eat("{")?;
+        self.trim();
+        let body = self.parse_expr()?;
+        self.trim();
+        self.eat("}")?;
+        let result = Expr::Let {
+            loc: (self.loc, loc),
+            bindings,
+            body: Box::new(body),
+        };
+        self.trim();
+        Ok(result)
     }
 
     fn parse_case(&mut self) -> Result<Expr, Error> {
