@@ -5,11 +5,6 @@ not : Bool -> Bool {
   }
 }
 
-type List a {
-  Nil,
-  Cons a (List a)
-}
-
 empty : List a -> Bool {
   list -> case list {
     Nil -> True,

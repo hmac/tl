@@ -1,5 +1,3 @@
-type List a { Nil, Cons a (List a) }
-
 reverse : List a -> List a {
   l -> reverse_ l Nil
 }

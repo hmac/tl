@@ -1,8 +1,3 @@
-type List a {
-  Nil,
-  Cons a (List a)
-}
-
 length : List a -> Int {
   l -> case l {
     Nil -> 0,

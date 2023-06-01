@@ -172,6 +172,46 @@ impl Typechecker {
     pub fn new() -> Self {
         let mut types = HashMap::new();
         let mut constructors = HashMap::new();
+        // Insert the List type
+        // TODO: when list cons syntax is added, remove these constructors
+        // TODO: add constructors - this needs access to `type_variables`.
+        types.insert("List".to_string(), vec!["a".to_string()]);
+        constructors.insert(
+            "Nil".to_string(),
+            (
+                "List".to_string(),
+                (0, 0),
+                Type::App {
+                    head: Box::new(Type::Named("List".to_string())),
+                    args: vec![Type::Var("a".to_string())],
+                },
+            ),
+        );
+        constructors.insert(
+            "Cons".to_string(),
+            (
+                "List".to_string(),
+                (0, 0),
+                Type::Func(
+                    Box::new(Type::Var("a".to_string())),
+                    Box::new(Type::Func(
+                        Box::new(Type::App {
+                            head: Box::new(Type::Named("List".to_string())),
+                            args: vec![Type::Var("a".to_string())],
+                        }),
+                        Box::new(Type::App {
+                            head: Box::new(Type::Named("List".to_string())),
+                            args: vec![Type::Var("a".to_string())],
+                        }),
+                    )),
+                ),
+            ),
+        );
+
+        constructors.insert(
+            "False".to_string(),
+            ("Bool".to_string(), (0, 0), Type::Bool),
+        );
         types.insert("Bool".to_string(), vec![]);
         // Insert the constructors for Bool, which is a built-in type.
         // The locations are fake.
@@ -315,6 +355,41 @@ impl Typechecker {
                 let ty = self.infer_var(local_variables, type_variables, v, *loc)?;
                 self.assert_type_eq(type_variables, expected_type, &ty, *loc)
             }
+            Expr::List(loc, elems) => {
+                if elems.is_empty() {
+                    // If the list is empty, check that the expected_type is `List x` for some x.
+                    match expected_type {
+                        Type::App { head, .. } => match &**head {
+                            Type::Named(l) if l == "List" => Ok(()),
+                            _ => {
+                                // Construct a `List a` type (with fresh `a`) in order to generate
+                                // a useful error message.
+                                let actual = self.make_fresh_list_type(type_variables);
+                                Err(Error::ExpectedType {
+                                    actual,
+                                    expected: expected_type.clone(),
+                                    loc: *loc,
+                                })
+                            }
+                        },
+                        _ => {
+                            // Same as above
+                            let actual = self.make_fresh_list_type(type_variables);
+                            Err(Error::ExpectedType {
+                                actual,
+                                expected: expected_type.clone(),
+                                loc: *loc,
+                            })
+                        }
+                    }
+                } else {
+                    // Check that each element has the expected type
+                    for elem in elems {
+                        self.check_expr(local_variables, type_variables, elem, expected_type)?;
+                    }
+                    Ok(())
+                }
+            }
             Expr::Case {
                 target,
                 branches,
@@ -446,6 +521,21 @@ impl Typechecker {
         match expr {
             Expr::Int(_, _) => Ok(TYPE_INT),
             Expr::Var(loc, v) => self.infer_var(local_variables, type_variables, v, *loc),
+            Expr::List(_, elems) => {
+                // If the list is empty, generate a fresh type variable `a` and return `List a`.
+                match elems.split_first() {
+                    None => Ok(self.make_fresh_list_type(type_variables)),
+                    Some((first, rest)) => {
+                        // Infer the first element
+                        // Check that the remaining elements have the same type
+                        let ty = self.infer_expr(local_variables, type_variables, first)?;
+                        for elem in rest {
+                            self.check_expr(local_variables, type_variables, elem, &ty)?;
+                        }
+                        Ok(ty)
+                    }
+                }
+            }
             Expr::Case {
                 target,
                 branches,
@@ -1014,6 +1104,22 @@ impl Typechecker {
             }
         }
         Ok(())
+    }
+
+    fn make_fresh_var(&self, type_variables: &mut TypeVariables) -> Type {
+        let var = match self.rename("a", type_variables) {
+            Some(var) => var,
+            None => "a".to_string(),
+        };
+        type_variables.insert(var.clone(), VarState::Unsolved);
+        Type::Var(var)
+    }
+
+    fn make_fresh_list_type(&self, type_variables: &mut TypeVariables) -> Type {
+        Type::App {
+            head: Box::new(Type::Named("List".to_string())),
+            args: vec![self.make_fresh_var(type_variables)],
+        }
     }
 }
 

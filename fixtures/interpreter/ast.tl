@@ -1,11 +1,6 @@
 // TODO
 type String {}
 
-type List a {
-  Nil,
-  Cons a (List a)
-}
-
 type Expr {
   Var Var,
   Integer Int,

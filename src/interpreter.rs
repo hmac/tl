@@ -25,10 +25,21 @@ impl Interpreter {
     pub fn eval(&self, locals: &LocalVariables<Value>, expr: &Expr) -> Result<Value, Error> {
         match expr {
             Expr::Int(_, n) => Ok(Value::Int(*n)),
+            Expr::List(_, elems) => {
+                // Evaluate each element and construct a linked list
+                let mut value = Value::ListNil;
+                for elem in elems {
+                    let elem_value = self.eval(locals, elem)?;
+                    value = Value::ListCons(Box::new(elem_value), Box::new(value));
+                }
+                Ok(value)
+            }
             Expr::App { head, args, .. } => {
                 let head_value = self.eval(locals, head)?;
                 match head_value {
-                    Value::Int(_) | Value::Bool(_) => return Err(Error::ApplicationOfNonFunction),
+                    Value::Int(_) | Value::Bool(_) | Value::ListNil | Value::ListCons(_, _) => {
+                        return Err(Error::ApplicationOfNonFunction)
+                    }
                     Value::Func {
                         params,
                         mut applied_args,
@@ -275,6 +286,8 @@ fn eval_operator(op: Operator, args: Vec<Value>) -> Value {
 pub enum Value {
     Int(i64),
     Bool(bool),
+    ListCons(Box<Value>, Box<Value>),
+    ListNil,
     Func {
         params: Vec<String>,
         applied_args: Vec<Value>,
@@ -325,6 +338,16 @@ impl PartialEq for Value {
                 } => name_l == name_r && args_l == args_r,
                 _ => unreachable!(),
             },
+            Self::ListNil => match other {
+                Self::ListNil => true,
+                Self::ListCons(_, _) => false,
+                _ => unreachable!(),
+            },
+            Self::ListCons(h1, t1) => match other {
+                Self::ListNil => false,
+                Self::ListCons(h2, t2) => h1 == h2 && t1 == t2,
+                _ => unreachable!(),
+            },
         }
     }
 }
@@ -343,8 +366,32 @@ impl std::fmt::Display for Value {
                 }
                 Ok(())
             }
+            Value::ListCons(head, tail) => display_nonempty_list(f, &head, &tail),
+            Value::ListNil => write!(f, "[]"),
         }
     }
+}
+
+fn display_nonempty_list<'a>(
+    f: &mut std::fmt::Formatter<'_>,
+    mut head: &'a Value,
+    mut tail: &'a Value,
+) -> Result<(), std::fmt::Error> {
+    write!(f, "[")?;
+    loop {
+        write!(f, "{}", head)?;
+        match &*tail {
+            Value::ListNil => {
+                break;
+            }
+            Value::ListCons(h, t) => {
+                head = &*h;
+                tail = &*t;
+            }
+            _ => unreachable!(),
+        }
+    }
+    write!(f, "]")
 }
 
 #[derive(Debug)]

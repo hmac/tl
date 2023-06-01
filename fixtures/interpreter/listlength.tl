@@ -1,12 +1,12 @@
-type List { Nil, Cons Int List }
+type IntList { IntNil, IntCons Int IntList }
 
-length : List -> Int {
+length : IntList -> Int {
   l -> case l {
-    Nil -> 0,
-    Cons _ rest -> + (length rest) 1,
+    IntNil -> 0,
+    IntCons _ rest -> + (length rest) 1,
   }
 }
 
-main : Int { length (Cons 1 (Cons 2 Nil)) }
+main : Int { length (IntCons 1 (IntCons 2 IntNil)) }
 ---
 2

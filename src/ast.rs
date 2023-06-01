@@ -313,6 +313,7 @@ impl Type {
 pub enum Expr {
     Var(Loc, Var),
     Int(Loc, i64),
+    List(Loc, Vec<Expr>),
     Case {
         loc: Loc,
         target: Box<Expr>,
@@ -340,6 +341,7 @@ impl HasLoc for Expr {
         match self {
             Self::Var(loc, _) => *loc,
             Self::Int(loc, _) => *loc,
+            Self::List(loc, _) => *loc,
             Self::Case { loc, .. } => *loc,
             Self::Func { loc, .. } => *loc,
             Self::App { loc, .. } => *loc,

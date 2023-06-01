@@ -1,5 +1,3 @@
-type List a { Nil, Cons a (List a) }
-
 type List2 a { Nil2, Cons2 a (List2 a) }
 
 convert : List a -> List2 a {
@@ -22,7 +20,7 @@ main : Int {
 ---
 Error:
 
-  19: main : Int {
-  20:   length (convert (Cons2 1 Nil2))
+  17: main : Int {
+  18:   length (convert (Cons2 1 Nil2))
                          ^^^^^
                           expected this to have the type List, but it actually has the type List2

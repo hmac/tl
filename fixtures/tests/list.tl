@@ -1,5 +1,3 @@
-type List a { Nil, Cons a (List a) }
-
 map : (a -> b) -> List a -> List b {
   f l -> case l {
     Nil -> Nil,
