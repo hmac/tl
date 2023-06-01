@@ -532,6 +532,7 @@ impl Parser {
         }
     }
 
+    /// Parse a list literal `[1, 2, 3]` or a list cons `[1, 2, ..x]`.
     fn parse_list(&mut self) -> Result<Expr, Error> {
         let loc = self.loc;
         self.eat("[")?;
@@ -541,8 +542,11 @@ impl Parser {
             if self.input().starts_with("]") {
                 break;
             }
+            if self.input().starts_with("..") {
+                return self.parse_list_cons_remainder(loc, elems);
+            }
             self.trim();
-            elems.push(dbg!(self.parse_expr()?));
+            elems.push(self.parse_expr()?);
             self.trim();
             self.try_eat(",");
         }
@@ -550,6 +554,33 @@ impl Parser {
         let result = Expr::List((loc, self.loc), elems);
         self.trim();
         Ok(result)
+    }
+
+    /// Assumes that the input starts with `..` and parses the rest of the expression
+    /// `[x, y, ..z]` with 0 or more `x`, `y`.
+    /// We require that there is no whitespace between `..` and `z`.
+    /// `x`, `y`, and `z` can all be arbitrary expressions.
+    fn parse_list_cons_remainder(&mut self, loc: usize, elems: Vec<Expr>) -> Result<Expr, Error> {
+        self.eat("..")?;
+        let list = self.parse_expr()?;
+        self.trim();
+        self.eat("]")?;
+        let result = Self::desugar_list_cons(elems, list, (loc, self.loc));
+        dbg!(&result);
+        self.trim();
+        Ok(result)
+    }
+
+    /// Desugar `[x, y, ..z]` to `Cons x (Cons y z)`.
+    fn desugar_list_cons(elems: Vec<Expr>, list: Expr, loc: Loc) -> Expr {
+        elems.into_iter().rfold(list, |l, x| Expr::App {
+            loc: loc,
+            head: Box::new(Expr::Var(
+                (x.loc().0, loc.1),
+                Var::Constructor("Cons".to_string()),
+            )),
+            args: vec![x, l],
+        })
     }
 
     fn parse_let(&mut self) -> Result<Expr, Error> {

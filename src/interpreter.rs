@@ -102,11 +102,28 @@ impl Interpreter {
                         name,
                         mut applied_args,
                     } => {
-                        for arg in args {
-                            applied_args.push(self.eval(locals, arg)?);
-                        }
+                        // Special case: if the constructor is Cons and we have 2 args, create a ListCons
+                        if name == "Cons" && applied_args.len() + args.len() == 2 {
+                            if applied_args.is_empty() {
+                                let arg1 = self.eval(locals, &args[0])?;
+                                let arg2 = self.eval(locals, &args[1])?;
+                                Ok(Value::ListCons(Box::new(arg1), Box::new(arg2)))
+                            } else {
+                                // Assuming all App nodes have at least 1 arg,
+                                // we must have 1 arg each in applied_args and args.
+                                assert_eq!(applied_args.len(), 1);
+                                assert_eq!(args.len(), 1);
+                                let arg1 = applied_args.pop().unwrap();
+                                let arg2 = self.eval(locals, &args[1])?;
+                                Ok(Value::ListCons(Box::new(arg1), Box::new(arg2)))
+                            }
+                        } else {
+                            for arg in args {
+                                applied_args.push(self.eval(locals, arg)?);
+                            }
 
-                        Ok(Value::Constructor { name, applied_args })
+                            Ok(Value::Constructor { name, applied_args })
+                        }
                     }
                 }
             }
@@ -171,6 +188,41 @@ impl Interpreter {
                                     // Bind the branch args
                                     let new_locals =
                                         self.build_locals_from_patterns(args.clone(), applied_args);
+                                    // Evaluate the rhs
+                                    return self.eval(&locals.extend(new_locals), &branch.rhs);
+                                }
+                                Pattern::Wildcard { .. } => {
+                                    return self.eval(locals, &branch.rhs);
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(Error::NoMatchingBranch)
+                    }
+                    Value::ListNil => {
+                        for branch in branches {
+                            match &branch.pattern {
+                                Pattern::Constructor { name: n, .. } if n == "Nil" => {
+                                    return self.eval(&locals, &branch.rhs);
+                                }
+                                Pattern::Wildcard { .. } => {
+                                    return self.eval(locals, &branch.rhs);
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(Error::NoMatchingBranch)
+                    }
+                    Value::ListCons(head, tail) => {
+                        // Find a branch that matches the constructor name
+                        for branch in branches {
+                            match &branch.pattern {
+                                Pattern::Constructor { name: n, args, .. } if n == "Cons" => {
+                                    // Bind the branch args
+                                    let new_locals = self.build_locals_from_patterns(
+                                        args.clone(),
+                                        vec![*head, *tail],
+                                    );
                                     // Evaluate the rhs
                                     return self.eval(&locals.extend(new_locals), &branch.rhs);
                                 }
