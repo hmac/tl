@@ -26,11 +26,17 @@ impl Interpreter {
         match expr {
             Expr::Int(_, n) => Ok(Value::Int(*n)),
             Expr::List(_, elems) => {
-                // Evaluate each element and construct a linked list
-                let mut value = Value::ListNil;
+                // Evaluate each element
+                let mut elem_values = vec![];
                 for elem in elems {
-                    let elem_value = self.eval(locals, elem)?;
-                    value = Value::ListCons(Box::new(elem_value), Box::new(value));
+                    elem_values.push(self.eval(locals, elem)?);
+                }
+                // Construct a linked list. We must work backwards to build up from the last
+                // element.
+                elem_values.reverse();
+                let mut value = Value::ListNil;
+                for v in elem_values {
+                    value = Value::ListCons(Box::new(v), Box::new(value));
                 }
                 Ok(value)
             }
@@ -385,6 +391,7 @@ fn display_nonempty_list<'a>(
                 break;
             }
             Value::ListCons(h, t) => {
+                write!(f, ", ")?;
                 head = &*h;
                 tail = &*t;
             }

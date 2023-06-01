@@ -389,6 +389,9 @@ impl Parser {
         if self.input().starts_with("let") {
             return self.parse_let();
         }
+        if self.input().starts_with("[") {
+            return self.parse_list();
+        }
 
         // Otherwise, it's a function application or a function
         // f x y
@@ -527,6 +530,26 @@ impl Parser {
         } else {
             return Err(Error::ExpectedLowerIdent((loc, self.loc)));
         }
+    }
+
+    fn parse_list(&mut self) -> Result<Expr, Error> {
+        let loc = self.loc;
+        self.eat("[")?;
+        let mut elems = vec![];
+        loop {
+            self.trim();
+            if self.input().starts_with("]") {
+                break;
+            }
+            self.trim();
+            elems.push(dbg!(self.parse_expr()?));
+            self.trim();
+            self.try_eat(",");
+        }
+        self.eat("]")?;
+        let result = Expr::List((loc, self.loc), elems);
+        self.trim();
+        Ok(result)
     }
 
     fn parse_let(&mut self) -> Result<Expr, Error> {
@@ -792,7 +815,7 @@ fn upper_ident_char(c: char) -> bool {
 }
 
 fn alphanum_or_underscore_char(c: char) -> bool {
-    c == '_' || (c >= 'A' && c <= 'z') || (c >= '0' && c <= '9')
+    c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
 }
 
 fn whitespace_char(c: char) -> bool {

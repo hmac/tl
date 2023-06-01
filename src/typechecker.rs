@@ -356,24 +356,21 @@ impl Typechecker {
                 self.assert_type_eq(type_variables, expected_type, &ty, *loc)
             }
             Expr::List(loc, elems) => {
-                if elems.is_empty() {
-                    // If the list is empty, check that the expected_type is `List x` for some x.
-                    match expected_type {
-                        Type::App { head, .. } => match &**head {
-                            Type::Named(l) if l == "List" => Ok(()),
-                            _ => {
-                                // Construct a `List a` type (with fresh `a`) in order to generate
-                                // a useful error message.
-                                let actual = self.make_fresh_list_type(type_variables);
-                                Err(Error::ExpectedType {
-                                    actual,
-                                    expected: expected_type.clone(),
-                                    loc: *loc,
-                                })
+                // Check that the expected_type is `List x` for some x.
+                match expected_type {
+                    Type::App { head, args } => match &**head {
+                        Type::Named(l) if l == "List" => {
+                            // If the list is empty, we're done.
+                            // If it has elements, check their type.
+                            let elem_type = &args[0]; // TODO: is this guaranteed to exist?
+                            for elem in elems {
+                                self.check_expr(local_variables, type_variables, elem, elem_type)?;
                             }
-                        },
+                            Ok(())
+                        }
                         _ => {
-                            // Same as above
+                            // Construct a `List a` type (with fresh `a`) in order to generate
+                            // a useful error message.
                             let actual = self.make_fresh_list_type(type_variables);
                             Err(Error::ExpectedType {
                                 actual,
@@ -381,13 +378,16 @@ impl Typechecker {
                                 loc: *loc,
                             })
                         }
+                    },
+                    _ => {
+                        // Same as above
+                        let actual = self.make_fresh_list_type(type_variables);
+                        Err(Error::ExpectedType {
+                            actual,
+                            expected: expected_type.clone(),
+                            loc: *loc,
+                        })
                     }
-                } else {
-                    // Check that each element has the expected type
-                    for elem in elems {
-                        self.check_expr(local_variables, type_variables, elem, expected_type)?;
-                    }
-                    Ok(())
                 }
             }
             Expr::Case {
@@ -499,6 +499,7 @@ impl Typechecker {
                         type_variables,
                         &value,
                     )?;
+                    debug!("value: {value:?}");
                     new_locals.insert(name.to_string(), ty);
                 }
                 // Check the body
@@ -532,7 +533,7 @@ impl Typechecker {
                         for elem in rest {
                             self.check_expr(local_variables, type_variables, elem, &ty)?;
                         }
-                        Ok(ty)
+                        Ok(self.make_list_type(ty))
                     }
                 }
             }
@@ -1115,11 +1116,15 @@ impl Typechecker {
         Type::Var(var)
     }
 
-    fn make_fresh_list_type(&self, type_variables: &mut TypeVariables) -> Type {
+    fn make_list_type(&self, elem_type: Type) -> Type {
         Type::App {
             head: Box::new(Type::Named("List".to_string())),
-            args: vec![self.make_fresh_var(type_variables)],
+            args: vec![elem_type],
         }
+    }
+
+    fn make_fresh_list_type(&self, type_variables: &mut TypeVariables) -> Type {
+        self.make_list_type(self.make_fresh_var(type_variables))
     }
 }
 
