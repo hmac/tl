@@ -394,11 +394,13 @@ impl PartialEq for Value {
                     name: name_r,
                     applied_args: args_r,
                 } => name_l == name_r && args_l == args_r,
-                _ => unreachable!(),
+                Self::ListNil => name_l == "Nil",
+                _ => unreachable!("{:?} == {:?}", self, other),
             },
             Self::ListNil => match other {
                 Self::ListNil => true,
                 Self::ListCons(_, _) => false,
+                Self::Constructor { name, .. } => name == "Nil",
                 _ => unreachable!(),
             },
             Self::ListCons(h1, t1) => match other {

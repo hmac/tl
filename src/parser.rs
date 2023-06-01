@@ -478,6 +478,12 @@ impl Parser {
         if self.input().starts_with("case") {
             return self.parse_case();
         }
+        if self.input().starts_with("let") {
+            return self.parse_let();
+        }
+        if self.input().starts_with("[") {
+            return self.parse_list();
+        }
         if self.input().starts_with("(") {
             self.eat("(")?;
             let e = self.parse_expr()?;
@@ -566,7 +572,6 @@ impl Parser {
         self.trim();
         self.eat("]")?;
         let result = Self::desugar_list_cons(elems, list, (loc, self.loc));
-        dbg!(&result);
         self.trim();
         Ok(result)
     }

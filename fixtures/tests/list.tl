@@ -6,8 +6,8 @@ map : (a -> b) -> List a -> List b {
 }
 
 test map {
-  == (map (x -> + x 1) (Cons 1 (Cons 2 (Cons 3 Nil))))
-    (Cons 2 (Cons 3 (Cons 4 Nil)))
+  == (map (x -> + x 1) [1, 2, 3])
+    [2, 3, 4]
 }
 
 foldl : (b -> a -> b) -> b -> List a -> b {

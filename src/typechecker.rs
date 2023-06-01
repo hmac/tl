@@ -356,39 +356,15 @@ impl Typechecker {
                 self.assert_type_eq(type_variables, expected_type, &ty, *loc)
             }
             Expr::List(loc, elems) => {
-                // Check that the expected_type is `List x` for some x.
-                match expected_type {
-                    Type::App { head, args } => match &**head {
-                        Type::Named(l) if l == "List" => {
-                            // If the list is empty, we're done.
-                            // If it has elements, check their type.
-                            let elem_type = &args[0]; // TODO: is this guaranteed to exist?
-                            for elem in elems {
-                                self.check_expr(local_variables, type_variables, elem, elem_type)?;
-                            }
-                            Ok(())
-                        }
-                        _ => {
-                            // Construct a `List a` type (with fresh `a`) in order to generate
-                            // a useful error message.
-                            let actual = self.make_fresh_list_type(type_variables);
-                            Err(Error::ExpectedType {
-                                actual,
-                                expected: expected_type.clone(),
-                                loc: *loc,
-                            })
-                        }
-                    },
-                    _ => {
-                        // Same as above
-                        let actual = self.make_fresh_list_type(type_variables);
-                        Err(Error::ExpectedType {
-                            actual,
-                            expected: expected_type.clone(),
-                            loc: *loc,
-                        })
-                    }
+                // Construct a fresh `List a` type, and unify it with the expected type.
+                let elem_type = self.make_fresh_var(type_variables);
+                let list_type = self.make_list_type(elem_type.clone());
+                self.assert_type_eq(type_variables, expected_type, &list_type, *loc)?;
+                // Check that the list elements have type `a`
+                for elem in elems {
+                    self.check_expr(local_variables, type_variables, elem, &elem_type)?;
                 }
+                Ok(())
             }
             Expr::Case {
                 target,
