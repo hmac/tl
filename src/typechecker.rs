@@ -1026,11 +1026,23 @@ impl Typechecker {
                                 expected: actual.clone(),
                             })
                         } else {
-                            Err(Error::ExpectedType {
-                                loc,
-                                expected: Type::Var(expected.to_string()),
-                                actual: actual.clone(),
-                            })
+                            // If actual is also a type variable, try solving them the other way
+                            // around.
+                            if let Type::Var(actual) = actual {
+                                self.try_solve_type_var(
+                                    type_variables,
+                                    actual,
+                                    &Type::Var(expected.to_string()),
+                                    loc,
+                                    true,
+                                )
+                            } else {
+                                Err(Error::ExpectedType {
+                                    loc,
+                                    expected: Type::Var(expected.to_string()),
+                                    actual: actual.clone(),
+                                })
+                            }
                         }
                     }
                 }

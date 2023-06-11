@@ -303,13 +303,14 @@ impl Parser {
         match components.pop_front() {
             Some((loc, c)) => match c {
                 TypeComponent::Arrow => {
-                    let rest = self.make_type_from_components(components)?;
-                    Ok(SourceType::Func(loc, Box::new(ty), Box::new(rest)))
+                    if components.is_empty() {
+                        Err(Error::ExpectedType((loc.1, loc.1)))
+                    } else {
+                        let rest = self.make_type_from_components(components)?;
+                        Ok(SourceType::Func(loc, Box::new(ty), Box::new(rest)))
+                    }
                 }
                 TypeComponent::Type(_) => {
-                    // Note: this code is currently dead, because we don't support polymorphism and
-                    // so there are no type applications.
-
                     // We have two non-arrow types in a row, so we're looking at a type
                     // application. Take components from the list until we reach the end or we
                     // reach an arrow.

@@ -30,7 +30,7 @@ zip : List a -> List b -> List (Pair a b) {
     Nil -> Nil,
     Cons lx lxx -> case r {
       Nil -> Nil,
-      Cons rx rxx -> Cons (Pair lx rx) (zip lxx rxx)
+      Cons rx rxx -> [Pair lx rx, ..zip lxx rxx]
     }
   }
 }
@@ -84,7 +84,7 @@ elimPair : (a -> b -> c) -> Pair a b -> c {
 }
 
 main : Int {
- case (head (zip (Cons 1 (Cons 2 Nil)) (Cons 3 (Cons 4 Nil)))) {
+ case (head (zip [1, 2] [3, 4])) {
    None -> 0,
    Some p -> elimPair (x y -> + x y) p
  }
