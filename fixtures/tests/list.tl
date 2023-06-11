@@ -65,3 +65,38 @@ len_helper : Int -> List a -> Int {
 test len {
   == (len [1, 2, 3]) 3
 }
+
+append : List a -> List a -> List a {
+  ls rs -> case ls {
+    Nil -> rs,
+    Cons x xs -> Cons x (append xs rs)
+  }
+}
+
+test append {
+  == (append [1, 2, 3] [4, 5, 6]) [1, 2, 3, 4, 5, 6]
+}
+
+type Option a { None, Some a }
+
+first : List a -> Option a {
+  l -> case l {
+    Nil -> None,
+    Cons x _ -> Some x,
+  }
+}
+
+test first { == (first [1, 2]) (Some 1) }
+test first_empty { == (first Nil) None }
+
+last : List a -> Option a {
+  l -> case l {
+    Nil -> None,
+    Cons x Nil -> Some x,
+    Cons _ r -> last r,
+  }
+}
+
+test last { == (last [1, 2]) (Some 2) }
+test last_one { == (last [1]) (Some 1) }
+test last_empty { == (last Nil) None }

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use tracing::debug;
+
 use crate::ast::{Expr, LetBinding, Operator, Pattern, TypeConstructor, Var};
 use crate::local_variables::LocalVariables;
 
@@ -146,6 +148,8 @@ impl Interpreter {
                 // Evaluate the target
                 let target_value = self.eval(locals, target)?;
 
+                debug!(?target_value, ?branches, "evaluating case expression");
+
                 // Check its constructor.
                 match target_value {
                     Value::Int(n) => {
@@ -183,13 +187,36 @@ impl Interpreter {
                     Value::Constructor { name, applied_args } => {
                         // Find a branch that matches the constructor name
                         for branch in branches {
+                            debug!(?branch, "checking branch");
                             match &branch.pattern {
                                 Pattern::Constructor { name: n, args, .. } if *n == name => {
-                                    // Bind the branch args
-                                    let new_locals =
-                                        self.build_locals_from_patterns(args.clone(), applied_args);
-                                    // Evaluate the rhs
-                                    return self.eval(&locals.extend(new_locals), &branch.rhs);
+                                    match self.match_patterns(args.as_slice(), &applied_args) {
+                                        Some(new_locals) => {
+                                            debug!(
+                                                ?branch,
+                                                ?name,
+                                                ?applied_args,
+                                                "case match pass"
+                                            );
+                                            let mut owned_new_locals = HashMap::new();
+                                            // TODO: it should be possible to avoid this clone.
+                                            for (k, v) in new_locals.into_iter() {
+                                                owned_new_locals.insert(k, v.clone());
+                                            }
+                                            return self.eval(
+                                                &locals.extend(owned_new_locals),
+                                                &branch.rhs,
+                                            );
+                                        }
+                                        None => {
+                                            debug!(
+                                                ?branch,
+                                                ?name,
+                                                ?applied_args,
+                                                "case match failure"
+                                            );
+                                        }
+                                    }
                                 }
                                 Pattern::Wildcard { .. } => {
                                     return self.eval(locals, &branch.rhs);
@@ -197,13 +224,17 @@ impl Interpreter {
                                 _ => {}
                             }
                         }
+                        debug!(?branches, ?name, "case match no match");
                         Err(Error::NoMatchingBranch)
                     }
                     Value::ListNil => {
+                        debug!("checking case for ListNil");
                         for branch in branches {
+                            debug!(?branch, "checking branch");
                             match &branch.pattern {
-                                Pattern::Constructor { name: n, .. } if n == "Nil" => {
-                                    return self.eval(&locals, &branch.rhs);
+                                Pattern::Constructor { name, args, .. } if name == "Nil" => {
+                                    assert_eq!(args.len(), 0);
+                                    return self.eval(locals, &branch.rhs);
                                 }
                                 Pattern::Wildcard { .. } => {
                                     return self.eval(locals, &branch.rhs);
@@ -214,17 +245,27 @@ impl Interpreter {
                         Err(Error::NoMatchingBranch)
                     }
                     Value::ListCons(head, tail) => {
+                        debug!(?head, ?tail, "finding branch for Cons");
+                        let applied_args = [*head, *tail];
                         // Find a branch that matches the constructor name
                         for branch in branches {
+                            debug!(?branch, "checking branch");
                             match &branch.pattern {
                                 Pattern::Constructor { name: n, args, .. } if n == "Cons" => {
-                                    // Bind the branch args
-                                    let new_locals = self.build_locals_from_patterns(
-                                        args.clone(),
-                                        vec![*head, *tail],
-                                    );
-                                    // Evaluate the rhs
-                                    return self.eval(&locals.extend(new_locals), &branch.rhs);
+                                    match self.match_patterns(args.as_slice(), &applied_args) {
+                                        Some(new_locals) => {
+                                            let mut owned_new_locals = HashMap::new();
+                                            // TODO: it should be possible to avoid this clone.
+                                            for (k, v) in new_locals.into_iter() {
+                                                owned_new_locals.insert(k, v.clone());
+                                            }
+                                            return self.eval(
+                                                &locals.extend(owned_new_locals),
+                                                &branch.rhs,
+                                            );
+                                        }
+                                        None => {}
+                                    }
                                 }
                                 Pattern::Wildcard { .. } => {
                                     return self.eval(locals, &branch.rhs);
@@ -284,23 +325,59 @@ impl Interpreter {
         new_locals
     }
 
-    fn build_locals_from_patterns(
-        &self,
-        params: Vec<Pattern>,
-        args: Vec<Value>,
-    ) -> HashMap<String, Value> {
+    /// Match each pattern to each arg.
+    /// If all args match their patterns, return a HashMap of the bound locals.
+    fn match_patterns<'a, 'b>(
+        &'a self,
+        patterns: &[Pattern],
+        args: &'b [Value],
+    ) -> Option<HashMap<String, &'b Value>> {
+        assert_eq!(patterns.len(), args.len());
         let mut new_locals = HashMap::new();
-        for (param, arg) in params.into_iter().zip(args.into_iter()) {
-            match param {
-                Pattern::Var { name, .. } => {
+        for (pattern, arg) in patterns.into_iter().zip(args.into_iter()) {
+            match (pattern, &arg) {
+                (Pattern::Var { name, .. }, _) => {
                     new_locals.insert(name.clone(), arg);
                 }
-                Pattern::Constructor { .. } => todo!(),
-                Pattern::Int { .. } => {}
-                Pattern::Wildcard { .. } => {}
+                (
+                    Pattern::Constructor {
+                        name, args: c_args, ..
+                    },
+                    Value::ListNil,
+                ) if name == "Nil" => {
+                    assert_eq!(c_args.len(), 0);
+                }
+                (
+                    Pattern::Constructor {
+                        name,
+                        args: _c_args,
+                        ..
+                    },
+                    Value::ListCons(_head, _tail),
+                ) if name == "Cons" => {
+                    todo!("bind constructor args");
+                }
+                (
+                    Pattern::Constructor {
+                        name, args: c_args, ..
+                    },
+                    Value::Constructor { name: n, .. },
+                ) if n == name => {
+                    if !c_args.is_empty() {
+                        todo!("bind constructor args");
+                    }
+                }
+                (Pattern::Constructor { .. }, _) => {
+                    return None;
+                }
+                (Pattern::Int { value, .. }, Value::Int(n)) if value == n => {}
+                (Pattern::Int { .. }, _) => {
+                    return None;
+                }
+                (Pattern::Wildcard { .. }, _) => {}
             }
         }
-        new_locals
+        Some(new_locals)
     }
 }
 
