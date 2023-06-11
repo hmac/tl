@@ -468,14 +468,32 @@ impl Typechecker {
             }
             Expr::Let { bindings, body, .. } => {
                 let mut new_locals = HashMap::new();
-                // Infer each binding, and add to local variables
-                for LetBinding { name, value, .. } in bindings {
-                    let ty = self.infer_expr(
-                        &local_variables.extend(new_locals.clone()),
-                        type_variables,
-                        &value,
-                    )?;
-                    debug!("value: {value:?}");
+                // Check each binding, and add to local variables
+                // If binding has a type, check it. Otherwise infer.
+                for LetBinding {
+                    name,
+                    value,
+                    r#type,
+                    ..
+                } in bindings
+                {
+                    let ty = if let Some(source_type) = r#type {
+                        let ty = Type::from_source_type(&source_type);
+                        // TODO: check type is well formed
+                        self.check_expr(
+                            &local_variables.extend(new_locals.clone()),
+                            type_variables,
+                            &value,
+                            &ty,
+                        )?;
+                        ty
+                    } else {
+                        self.infer_expr(
+                            &local_variables.extend(new_locals.clone()),
+                            type_variables,
+                            &value,
+                        )?
+                    };
                     new_locals.insert(name.to_string(), ty);
                 }
                 // Check the body

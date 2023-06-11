@@ -354,6 +354,7 @@ impl HasLoc for Expr {
 pub struct LetBinding {
     pub loc: Loc,
     pub name: String,
+    pub r#type: Option<SourceType>,
     pub value: Expr,
 }
 

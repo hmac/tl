@@ -601,11 +601,20 @@ impl Parser {
             let loc = self.loc;
             let name = self.parse_lower_ident()?;
             self.trim();
+            let ty = match self.try_eat(":") {
+                None => None,
+                Some(_) => {
+                    self.trim();
+                    let ty = self.parse_type()?;
+                    Some(ty)
+                }
+            };
             self.eat("=")?;
             self.trim();
             let value = self.parse_expr()?;
             bindings.push(LetBinding {
                 loc: (loc, self.loc),
+                r#type: ty,
                 name,
                 value,
             });
