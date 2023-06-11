@@ -100,3 +100,13 @@ last : List a -> Option a {
 test last { == (last [1, 2]) (Some 2) }
 test last_one { == (last [1]) (Some 1) }
 test last_empty { == (last Nil) None }
+
+tail : List a -> Option (List a) {
+  l -> case l {
+    Nil -> None,
+    Cons x rest -> Some rest,
+  }
+}
+
+test tail { == (tail [1, 2, 3]) (Some [2, 3]) }
+test tail_empty { == (tail Nil) None }
