@@ -37,11 +37,6 @@ pub enum Error {
         loc: Loc,
         actual_type: Type,
     },
-    TooManyArgumentsInApplication {
-        loc: Loc,
-        max_number_of_arguments: usize,
-        actual_number_of_arguments: usize,
-    },
     TooManyArgumentsInFunction {
         loc: Loc,
         expected_type: Type,
@@ -69,7 +64,6 @@ impl HasLoc for Error {
             Error::ExpectedFunctionType { loc, .. } => *loc,
             Error::DuplicateConstructor { duplicate, .. } => duplicate.loc,
             Error::CannotApplyNonFunction { loc, .. } => *loc,
-            Error::TooManyArgumentsInApplication { loc, .. } => *loc,
             Error::TooManyArgumentsInFunction { loc, .. } => *loc,
             Error::OccursCheck { loc, .. } => *loc,
         }
@@ -130,17 +124,6 @@ impl std::fmt::Display for Error {
                 write!(
                     f,
                     "this expression cannot be applied as a function, because it has type {actual_type}",
-                )
-            }
-            Error::TooManyArgumentsInApplication {
-                max_number_of_arguments,
-                actual_number_of_arguments,
-                ..
-            } => {
-                write!(
-                    f,
-                    "this function takes {max_number_of_arguments} {}, but is given {actual_number_of_arguments}",
-                    if *max_number_of_arguments > 1 { "arguments" } else { "argument" }
                 )
             }
             Error::TooManyArgumentsInFunction {
