@@ -42,6 +42,12 @@ pub enum Error {
         max_number_of_arguments: usize,
         actual_number_of_arguments: usize,
     },
+    TooManyArgumentsInFunction {
+        loc: Loc,
+        expected_type: Type,
+        expected_number_of_arguments: usize,
+        actual_number_of_arguments: usize,
+    },
     OccursCheck {
         loc: Loc,
         expected: Type,
@@ -64,6 +70,7 @@ impl HasLoc for Error {
             Error::DuplicateConstructor { duplicate, .. } => duplicate.loc,
             Error::CannotApplyNonFunction { loc, .. } => *loc,
             Error::TooManyArgumentsInApplication { loc, .. } => *loc,
+            Error::TooManyArgumentsInFunction { loc, .. } => *loc,
             Error::OccursCheck { loc, .. } => *loc,
         }
     }
@@ -134,6 +141,25 @@ impl std::fmt::Display for Error {
                     f,
                     "this function takes {max_number_of_arguments} {}, but is given {actual_number_of_arguments}",
                     if *max_number_of_arguments > 1 { "arguments" } else { "argument" }
+                )
+            }
+            Error::TooManyArgumentsInFunction {
+                expected_number_of_arguments,
+                actual_number_of_arguments,
+                expected_type,
+                ..
+            } => {
+                fn pluralise(i: usize) -> &'static str {
+                    if i > 1 {
+                        "arguments"
+                    } else {
+                        "argument"
+                    }
+                }
+                write!(
+                    f,
+                    "this function takes {actual_number_of_arguments} {}, but its type ({expected_type}) has only {expected_number_of_arguments} {}",
+                    pluralise(*actual_number_of_arguments), pluralise(*expected_number_of_arguments)
                 )
             }
             Error::OccursCheck {
@@ -391,22 +417,26 @@ impl Typechecker {
 
                 Ok(())
             }
-            Expr::Func { args, body, .. } => {
+            Expr::Func {
+                args, body, loc, ..
+            } => {
                 // Deconstruct expected type
                 let mut func_arg_types = expected_type.func_args().into_iter();
 
                 let mut new_locals = HashMap::new();
 
+                if args.len() > func_arg_types.len() {
+                    return Err(Error::TooManyArgumentsInFunction {
+                        expected_number_of_arguments: func_arg_types.len(),
+                        expected_type: expected_type.clone(),
+                        actual_number_of_arguments: args.len(),
+                        loc: *loc,
+                    });
+                }
+
                 // Add each arg to local variables
                 for (_, arg) in args {
-                    match func_arg_types.next() {
-                        Some(arg_type) => {
-                            new_locals.insert(arg.clone(), arg_type.clone());
-                        }
-                        None => {
-                            todo!("what error?");
-                        }
-                    }
+                    new_locals.insert(arg.clone(), func_arg_types.next().unwrap().clone());
                 }
 
                 // TODO: if there are more expr args than type args,
