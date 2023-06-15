@@ -194,3 +194,103 @@ foldr : (a -> b -> b) -> b -> List a -> b {
 }
 
 test foldr_list { == (foldr (x a -> [x, ..a]) [] [1, 2, 3]) [1, 2, 3] }
+test foldr_list_empty { == (foldr (x a -> [x, ..a]) [] []) [] }
+
+subsequences : List a -> List (List a) {
+  l -> case l {
+    Nil -> [],
+    Cons x xs -> [[x], ..foldr (ys r -> [ys, [x, ..ys], ..r]) [] (subsequences xs)]
+  }
+}
+
+test_subsequences {
+  == (subsequences [1, 2, 3])
+    [[1], [2], [1, 2], [3], [1, 3], [2, 3], [1, 2, 3]]
+}
+
+
+// Taken from the Haskell implementation.
+// Don't fully understand how this works.
+permutations : List a -> List (List a) {
+  xs0 -> [xs0, ..perms xs0 []]
+}
+
+// The next three functions are helpers for permutations.
+// interleave_ and perms are recursive, so can't be let-bound (yet).
+id : a -> a { x -> x }
+
+interleave_ : a -> List a -> (List a -> b) -> List a -> List b -> Pair (List a) (List b) {
+  t ts f l r -> case l {
+    Nil -> Pair ts r,
+    Cons y ys -> case interleave_ t ts (x -> f [y, ..x]) ys r {
+      Pair us zs -> Pair [y, ..us] [f [t, y, ..us], ..zs]
+    }
+  }
+}
+
+perms : List a -> List a -> List (List a) {
+  l is -> case l {
+    Nil -> Nil,
+    Cons t ts ->
+      let
+        interleave : List a -> List (List a) -> List (List a)
+          = xs r -> case interleave_ t ts id xs r { Pair _ zs -> zs },
+      { foldr interleave (perms ts [t, ..is]) (permutations is) }
+  }
+}
+
+test permutations {
+  == (permutations [1, 2, 3])
+    [[1, 2, 3], [2, 1, 3], [3, 2, 1], [2, 3, 1], [3, 1, 2], [1, 3, 2]]
+}
+
+test permutations_empty {
+  == (permutations []) [[]]
+}
+
+// This causes a stack overflow
+// test permutations_large {
+//   == (permutations [1, 2, 3, 4, 5, 6]) []
+// }
+
+concat : List (List a) -> List a {
+  foldr (x y -> foldr (a xs -> [a, ..xs]) y x) []
+}
+
+test concat { == (concat [[1, 2, 3], [4, 5], [6], []]) [1, 2, 3, 4, 5, 6] }
+test concat_empty { == (concat []) []}
+
+concat_map : (a -> List b) -> List a -> List b {
+  f l -> concat (map f l)
+}
+
+test concat_map {
+  == (concat_map (x -> [x, + x 1]) [1, 2, 3]) [1, 2, 2, 3, 3, 4]
+}
+test concat_map_empty {
+  == (concat_map (x -> []) []) []
+}
+
+and : Bool -> Bool -> Bool {
+  x y -> case x {
+    False -> False,
+    True -> y
+  }
+}
+
+all_true : List Bool -> Bool { foldl and True }
+
+test all_true_false { == (all_true [True, True, False, True]) False }
+test all_true_true { == (all_true [True, True, True, True]) True }
+
+sum : List Int -> Int {
+  foldl (+) 0
+}
+
+all : (a -> Bool) -> List a -> Bool {
+  p -> foldr (b acc -> and (p b) acc) True
+}
+
+test all {
+  == (all (xs -> == (sum xs) 4) [[1, 3], [2, 2], [0, 4]]) True
+}
