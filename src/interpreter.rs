@@ -25,9 +25,11 @@ impl Interpreter {
     }
 
     pub fn eval(&self, locals: &LocalVariables<Value>, expr: &Expr) -> Result<Value, Error> {
+        debug!(locals = ?locals.names(), "eval");
         match expr {
             Expr::Int(_, n) => Ok(Value::Int(*n)),
             Expr::List(_, elems) => {
+                debug!("eval_list");
                 // Evaluate each element
                 let mut elem_values = vec![];
                 for elem in elems {
@@ -43,98 +45,26 @@ impl Interpreter {
                 Ok(value)
             }
             Expr::App { head, args, .. } => {
+                debug!(?head, ?args, locals = ?locals.names(), "eval_app");
                 let head_value = self.eval(locals, head)?;
-                match head_value {
-                    Value::Int(_) | Value::Bool(_) | Value::ListNil | Value::ListCons(_, _) => {
-                        return Err(Error::ApplicationOfNonFunction)
-                    }
-                    Value::Func {
-                        params,
-                        mut applied_args,
-                        body,
-                    } => {
-                        assert!(params.len() > applied_args.len());
-
-                        // Evaluate and push args onto the function,
-                        // stopping if we've saturated it.
-                        let mut i = 0;
-                        while applied_args.len() < params.len() {
-                            match args.get(i) {
-                                Some(arg) => {
-                                    applied_args.push(self.eval(locals, arg)?);
-                                }
-                                None => {
-                                    break;
-                                }
-                            }
-                            i += 1;
-                        }
-
-                        // If we've saturated the function, evaluate its body.
-                        if applied_args.len() == params.len() {
-                            let new_locals = locals
-                                .extend(self.build_locals_from_func_args(params, applied_args));
-                            self.eval(&new_locals, &body)
-                        } else {
-                            // Otherwise, return it
-                            Ok(Value::Func {
-                                params,
-                                applied_args,
-                                body,
-                            })
-                        }
-                    }
-                    Value::Operator {
-                        op,
-                        mut applied_args,
-                    } => {
-                        let num_params = num_params_for_op(op);
-                        assert!(num_params > applied_args.len());
-
-                        // Operators don't return functions and can't be partially applied,
-                        // so we can assume that we have exactly the right number of args.
-
-                        for arg in args {
-                            applied_args.push(self.eval(locals, arg)?);
-                        }
-
-                        Ok(eval_operator(op, applied_args))
-                    }
-                    Value::Constructor {
-                        name,
-                        mut applied_args,
-                    } => {
-                        // Special case: if the constructor is Cons and we have 2 args, create a ListCons
-                        if name == "Cons" && applied_args.len() + args.len() == 2 {
-                            if applied_args.is_empty() {
-                                let arg1 = self.eval(locals, &args[0])?;
-                                let arg2 = self.eval(locals, &args[1])?;
-                                Ok(Value::ListCons(Box::new(arg1), Box::new(arg2)))
-                            } else {
-                                // Assuming all App nodes have at least 1 arg,
-                                // we must have 1 arg each in applied_args and args.
-                                assert_eq!(applied_args.len(), 1);
-                                assert_eq!(args.len(), 1);
-                                let arg1 = applied_args.pop().unwrap();
-                                let arg2 = self.eval(locals, &args[1])?;
-                                Ok(Value::ListCons(Box::new(arg1), Box::new(arg2)))
-                            }
-                        } else {
-                            for arg in args {
-                                applied_args.push(self.eval(locals, arg)?);
-                            }
-
-                            Ok(Value::Constructor { name, applied_args })
-                        }
-                    }
-                }
+                self.eval_app(locals, head_value, args)
             }
             Expr::Func { args, body, .. } => {
+                debug!(?args, ?body, "eval_func");
                 // If the function is nullary, evaluate its body directly.
                 if args.is_empty() {
                     self.eval(locals, body)
                 } else {
+                    // Store any captured variables by looking for free variable references in the
+                    // function.
+                    let mut captured_locals = HashMap::new();
+                    for v in expr.free_variables() {
+                        if let Some(val) = self.lookup_local_var(locals, v)? {
+                            captured_locals.insert(v.clone(), val);
+                        }
+                    }
                     Ok(Value::Func {
+                        locals: captured_locals,
                         params: args.iter().map(|(_, name)| name).cloned().collect(),
                         applied_args: vec![],
                         // TODO: avoid cloning body
@@ -148,7 +78,7 @@ impl Interpreter {
                 // Evaluate the target
                 let target_value = self.eval(locals, target)?;
 
-                debug!(?target_value, ?branches, "evaluating case expression");
+                debug!(?target_value, ?branches, "eval_case");
 
                 // Check its constructor.
                 match target_value {
@@ -278,30 +208,139 @@ impl Interpreter {
                     _ => Err(Error::InvalidMatchTarget),
                 }
             }
-            Expr::Var(_, v) => self.eval_var(locals, v),
+            Expr::Var(_, v) => {
+                debug!("eval_var");
+                self.eval_var(locals, v)
+            }
             Expr::Let { bindings, body, .. } => {
+                debug!(?bindings, ?body, "eval_let");
                 let mut new_locals = HashMap::new();
                 for LetBinding { name, value, .. } in bindings {
                     let val = self.eval(&locals.extend(new_locals.clone()), &value)?;
                     new_locals.insert(name.to_string(), val);
                 }
-                return self.eval(&locals.extend(new_locals), &body);
+                let locals = locals.extend(new_locals);
+                return self.eval(&locals, &body);
+            }
+        }
+    }
+
+    fn eval_app(
+        &self,
+        locals: &LocalVariables<Value>,
+        head: Value,
+        args: &[Expr],
+    ) -> Result<Value, Error> {
+        match head {
+            Value::Int(_) | Value::Bool(_) | Value::ListNil | Value::ListCons(_, _) => {
+                return Err(Error::ApplicationOfNonFunction)
+            }
+            Value::Func {
+                params,
+                locals: captured_locals,
+                mut applied_args,
+                body,
+            } => {
+                assert!(params.len() > applied_args.len());
+
+                // Evaluate and push args onto the function,
+                // stopping if we've saturated it.
+                let mut i = 0;
+                while applied_args.len() < params.len() {
+                    match args.get(i) {
+                        Some(arg) => {
+                            applied_args.push(self.eval(locals, arg)?);
+                        }
+                        None => {
+                            break;
+                        }
+                    }
+                    i += 1;
+                }
+
+                if applied_args.len() == params.len() {
+                    // If we've saturated the function, evaluate its body.
+                    let result = {
+                        // TODO: should we allow access to locals here?
+                        // shouldn't the function only see locals captured when it was defined?
+                        let locals =
+                            locals.extend(self.build_locals_from_func_args(params, applied_args));
+                        let locals = locals.extend(captured_locals);
+                        self.eval(&locals, &body)?
+                    };
+
+                    // If we have any args remaining, apply the result to them.
+                    if i < args.len() {
+                        self.eval_app(locals, result, &args[i..])
+                    } else {
+                        Ok(result)
+                    }
+                } else {
+                    // otherwise, return it
+                    Ok(Value::Func {
+                        locals: captured_locals,
+                        params,
+                        applied_args,
+                        body,
+                    })
+                }
+            }
+            Value::Operator {
+                op,
+                mut applied_args,
+            } => {
+                let num_params = num_params_for_op(op);
+                assert!(num_params > applied_args.len());
+
+                // Operators don't return functions and can't be partially applied,
+                // so we can assume that we have exactly the right number of args.
+
+                for arg in args {
+                    applied_args.push(self.eval(locals, arg)?);
+                }
+
+                Ok(eval_operator(op, applied_args))
+            }
+            Value::Constructor {
+                name,
+                mut applied_args,
+            } => {
+                // Special case: if the constructor is Cons and we have 2 args, create a ListCons
+                if name == "Cons" && applied_args.len() + args.len() == 2 {
+                    if applied_args.is_empty() {
+                        let arg1 = self.eval(locals, &args[0])?;
+                        let arg2 = self.eval(locals, &args[1])?;
+                        Ok(Value::ListCons(Box::new(arg1), Box::new(arg2)))
+                    } else {
+                        // Assuming all App nodes have at least 1 arg,
+                        // we must have 1 arg each in applied_args and args.
+                        assert_eq!(applied_args.len(), 1);
+                        assert_eq!(args.len(), 1);
+                        let arg1 = applied_args.pop().unwrap();
+                        let arg2 = self.eval(locals, &args[1])?;
+                        Ok(Value::ListCons(Box::new(arg1), Box::new(arg2)))
+                    }
+                } else {
+                    for arg in args {
+                        applied_args.push(self.eval(locals, arg)?);
+                    }
+
+                    Ok(Value::Constructor { name, applied_args })
+                }
             }
         }
     }
 
     fn eval_var(&self, locals: &LocalVariables<Value>, var: &Var) -> Result<Value, Error> {
+        debug!(?var, "eval_var");
         match var {
-            Var::Local(v) => {
-                // Check locals first
-                match locals.lookup(v) {
-                    Some(val) => Ok(val.clone()),
-                    None => match self.functions.get(v) {
-                        Some(func) => self.eval(locals, func),
-                        None => Err(Error::UndefinedVariable(v.to_string())),
-                    },
-                }
-            }
+            Var::Local(v) => match locals.lookup(v) {
+                Some(val) => Ok(val.clone()),
+                None => match self.functions.get(v) {
+                    Some(func) => self.eval(locals, func),
+                    None => Err(Error::UndefinedVariable(v.to_string())),
+                },
+            },
             Var::Constructor(name) => Ok(Value::Constructor {
                 name: name.to_string(),
                 applied_args: vec![],
@@ -310,6 +349,21 @@ impl Interpreter {
                 op: *op,
                 applied_args: vec![],
             }),
+        }
+    }
+
+    /// If the variable refers to a global function, returns None.
+    fn lookup_local_var(
+        &self,
+        locals: &LocalVariables<Value>,
+        var: &str,
+    ) -> Result<Option<Value>, Error> {
+        match locals.lookup(var) {
+            Some(val) => Ok(Some(val.clone())),
+            None => match self.functions.get(var) {
+                Some(_) => Ok(None),
+                None => Err(Error::UndefinedVariable(var.to_string())),
+            },
         }
     }
 
@@ -424,6 +478,10 @@ pub enum Value {
     ListCons(Box<Value>, Box<Value>),
     ListNil,
     Func {
+        // local variables read by the function
+        // these are the variables that were in scope when it was defined and are mentioned in the
+        // function body.
+        locals: HashMap<String, Value>,
         params: Vec<String>,
         applied_args: Vec<Value>,
         body: Expr,

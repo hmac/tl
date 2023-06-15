@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// (start, end) index pair into the source string
 pub type Loc = (usize, usize);
@@ -336,6 +336,69 @@ pub enum Expr {
     },
 }
 
+impl Expr {
+    pub fn free_variables(&self) -> HashSet<&String> {
+        match self {
+            Expr::Var(_, Var::Local(v)) => [v].into(),
+            Expr::Var(_, _) => HashSet::new(),
+            Expr::Int(_, _) => HashSet::new(),
+            Expr::List(_, elems) => elems.iter().flat_map(Self::free_variables).collect(),
+            Expr::Case { branches, .. } => {
+                let mut vars = HashSet::new();
+                for b in branches {
+                    for v in b.rhs.free_variables().difference(&b.pattern.vars()) {
+                        vars.insert(*v);
+                    }
+                }
+                vars
+            }
+            Expr::Func { args, body, .. } => {
+                let mut vars = HashSet::new();
+                for v in body
+                    .free_variables()
+                    .difference(&args.iter().map(|a| &a.1).collect())
+                {
+                    vars.insert(*v);
+                }
+                vars
+            }
+            Expr::App { head, args, .. } => args
+                .iter()
+                .flat_map(Self::free_variables)
+                .chain(head.free_variables().into_iter())
+                .collect(),
+            Expr::Let { bindings, body, .. } => {
+                let mut free_vars = HashSet::new();
+                let mut bound_vars = HashSet::new();
+                for b in bindings {
+                    free_vars = free_vars
+                        .union(
+                            &b.value
+                                .free_variables()
+                                .difference(&bound_vars)
+                                .map(|v| *v)
+                                .collect(),
+                        )
+                        .map(|v| *v)
+                        .collect();
+                    bound_vars.insert(&b.name);
+                }
+                free_vars = free_vars
+                    .union(
+                        &body
+                            .free_variables()
+                            .difference(&bound_vars)
+                            .map(|v| *v)
+                            .collect(),
+                    )
+                    .map(|v| *v)
+                    .collect();
+                free_vars
+            }
+        }
+    }
+}
+
 impl HasLoc for Expr {
     fn loc(&self) -> Loc {
         match self {
@@ -391,6 +454,17 @@ pub enum Pattern {
     },
 }
 
+impl Pattern {
+    pub fn vars(&self) -> HashSet<&String> {
+        match self {
+            Pattern::Constructor { args, .. } => args.iter().flat_map(Self::vars).collect(),
+            Pattern::Var { name, .. } => [name].into(),
+            Pattern::Int { .. } => HashSet::new(),
+            Pattern::Wildcard { .. } => HashSet::new(),
+        }
+    }
+}
+
 impl std::fmt::Display for Pattern {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
@@ -422,6 +496,8 @@ impl HasLoc for Pattern {
 
 #[derive(Debug, Clone)]
 pub enum Var {
+    // TODO: store global variables (i.e. functions) separately.
+    // This makes it easier to know what variables a function is capturing.
     Local(String),
     Constructor(String),
     Operator(Operator),

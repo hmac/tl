@@ -151,6 +151,7 @@ impl std::fmt::Display for Error {
 type TypeVariables = HashMap<String, VarState>;
 
 /// The state of a type variable during type checking
+#[derive(Debug)]
 enum VarState {
     /// The variable is current unsolved.
     Unsolved,
@@ -408,6 +409,10 @@ impl Typechecker {
                     }
                 }
 
+                // TODO: if there are more expr args than type args,
+                // currently we will crash.
+                // e.g. in f : Int -> Int { x y z -> 1 }
+
                 // Reconstruct remaining args into result type
                 let result_type = Type::from_func_args(&func_arg_types.collect());
 
@@ -425,46 +430,67 @@ impl Typechecker {
                 let head_type = self.infer_expr(local_variables, type_variables, head)?;
 
                 // Check that head is a function type
-                match head_type {
-                    Type::Func(_, _) => {}
+                let head_type = match head_type {
+                    Type::Func(_, _) => head_type,
+                    Type::Var(ref v) => {
+                        dbg!(v);
+                        // Generate new vars a, b and unify v with a -> b
+                        let domain = self.make_fresh_var(type_variables);
+                        let range = self.make_fresh_var(type_variables);
+                        dbg!(&domain, &range);
+                        let func_type = Type::Func(Box::new(domain), Box::new(range));
+                        self.assert_type_eq(type_variables, expected_type, &func_type, *loc)?;
+                        match type_variables.get_mut(v) {
+                            Some(state) => {
+                                *state = VarState::Solved(func_type.clone());
+                            }
+                            None => unreachable!(),
+                        }
+                        func_type
+                    }
                     _ => {
                         return Err(Error::CannotApplyNonFunction {
                             loc: *loc,
                             actual_type: head_type,
                         });
                     }
-                }
+                };
 
                 // Split type into args and result
                 let mut head_type_args = head_type.func_args();
                 // Because we know head_type is a function type, this pop_back is safe
                 let head_type_result = head_type_args.pop_back().unwrap();
-                let mut head_type_args = head_type_args.into_iter();
 
-                // Check if we are given too many arguments
-                if head_type_args.len() < args.len() {
-                    return Err(Error::TooManyArgumentsInApplication {
-                        max_number_of_arguments: head_type_args.len(),
-                        actual_number_of_arguments: args.len(),
-                        loc: expr.loc(),
-                    });
+                // There are three cases to consider:
+                // 1. args.len() == head_type_args.len(). We have a fully saturated function
+                //    application. This is the simple case.
+                // 2. args.len() < head_type_args.len(). We have a partially saturated application.
+                //    The type of the expression will be some suffix of the function's type.
+                // 3. args.len() > head_type_args.len(). We have more arguments than the function's
+                //    type specifies. Either the function returns another function which is then
+                //    applied, or the expression is ill-typed.
+
+                use std::cmp::Ordering;
+                match args.len().cmp(&head_type_args.len()) {
+                    Ordering::Equal | Ordering::Less => self.check_app_fewer_or_exact_args(
+                        local_variables,
+                        type_variables,
+                        head_type_args,
+                        head_type_result,
+                        args,
+                        expected_type,
+                        *loc,
+                    ),
+                    Ordering::Greater => self.check_app_more_args(
+                        local_variables,
+                        type_variables,
+                        head_type_args,
+                        head_type_result,
+                        args,
+                        expected_type,
+                        *loc,
+                    ),
                 }
-
-                for arg in args {
-                    match head_type_args.next() {
-                        Some(ty) => {
-                            self.check_expr(local_variables, type_variables, arg, ty)?;
-                        }
-                        None => unreachable!(),
-                    }
-                }
-
-                // Reconstruct result type
-                let mut head_type_args: VecDeque<_> = head_type_args.collect();
-                head_type_args.push_back(head_type_result);
-                let result_type = Type::from_func_args(&Vec::from(head_type_args));
-                self.assert_type_eq(type_variables, expected_type, &result_type, *loc)?;
-                Ok(())
             }
             Expr::Let { bindings, body, .. } => {
                 let mut new_locals = HashMap::new();
@@ -479,6 +505,11 @@ impl Typechecker {
                 {
                     let ty = if let Some(source_type) = r#type {
                         let ty = Type::from_source_type(&source_type);
+                        // Type variables in let bindings are treated similarly to those in
+                        // function signatures: they should not be unified.
+                        for var in ty.vars() {
+                            type_variables.insert(var, VarState::Poly);
+                        }
                         // TODO: check type is well formed
                         self.check_expr(
                             &local_variables.extend(new_locals.clone()),
@@ -505,6 +536,119 @@ impl Typechecker {
                 )
             }
         }
+    }
+
+    /// Check a function application, where there are fewer arguments than parameters in the
+    /// function's type, or exactly the right number of arguments.
+    fn check_app_fewer_or_exact_args(
+        &self,
+        local_variables: &LocalVariables<Type>,
+        type_variables: &mut TypeVariables,
+        head_type_args: VecDeque<&Type>,
+        head_type_result: &Type,
+        args: &[Expr],
+        expected_type: &Type,
+        loc: Loc,
+    ) -> Result<(), Error> {
+        assert!(args.len() <= head_type_args.len());
+
+        let mut head_type_args = head_type_args.into_iter();
+        for arg in args {
+            self.check_expr(
+                local_variables,
+                type_variables,
+                arg,
+                head_type_args.next().unwrap(),
+            )?;
+        }
+
+        // Reconstruct result type
+        let mut head_type_args: VecDeque<_> = head_type_args.collect();
+        head_type_args.push_back(head_type_result);
+        let result_type = Type::from_func_args(&Vec::from(head_type_args));
+        self.assert_type_eq(type_variables, expected_type, &result_type, loc)?;
+        Ok(())
+    }
+
+    fn check_app_more_args(
+        &self,
+        local_variables: &LocalVariables<Type>,
+        type_variables: &mut TypeVariables,
+        head_type_args: VecDeque<&Type>,
+        head_type_result: &Type,
+        args: &[Expr],
+        expected_type: &Type,
+        loc: Loc,
+    ) -> Result<(), Error> {
+        // We have more arguments than in the function's type.
+        // We must infer the type of each argument, and then construct the type
+        // t = arg1type -> arg2type -> ... -> resulttype
+        // and assert_type_eq(t, expected_type)
+        // but we also need to check the function's type matches this, too.
+
+        // if we have some head_type_args then we can check their corresponding arguments.
+        // after that we have to infer the remaining arguments.
+
+        // Check the args we have types for
+        let mut args = args.into_iter();
+        let mut last_arg_loc: Option<Loc> = None; // used to calculate locations later.
+        for type_arg in head_type_args.iter() {
+            match args.next() {
+                Some(arg) => {
+                    self.check_expr(local_variables, type_variables, arg, type_arg)?;
+                    last_arg_loc = Some(arg.loc());
+                }
+                None => {
+                    unreachable!();
+                }
+            }
+        }
+
+        // Now args holds the remaining args. We must infer each one.
+        let mut remaining_arg_types = vec![];
+        for arg in args {
+            remaining_arg_types.push(self.infer_expr(local_variables, type_variables, arg)?);
+        }
+
+        // We're checking that the return type of the function matches the type
+        // we would expect given the types of the remaining arguments and the overall expected type
+        // of the application.
+        //
+        // For example:
+        //
+        // f a b c d : T
+        // ^ ^^^ ^^^
+        // |  |   |
+        // |  |   remaining args
+        // |  |
+        // |  args mentioned in type
+        // |
+        // f : A -> B -> z
+        //
+        // we construct the type C -> D -> T and unify it with z.
+        //
+        // If there's an error here, we want the location to be helpful.
+        // We're talking about the type of the application "f a b", so the
+        // location should start at f and end at b.
+
+        // TODO: the errors generated here could be improved. See
+        // fixtures/type_errors/too_many_args_in_application.tl
+
+        let mut actual_function_result_type = expected_type.clone();
+        for arg_type in remaining_arg_types.iter().rev() {
+            actual_function_result_type = Type::Func(
+                Box::new(arg_type.clone()),
+                Box::new(actual_function_result_type),
+            );
+        }
+
+        self.assert_type_eq(
+            type_variables,
+            &actual_function_result_type,
+            head_type_result,
+            (loc.0, last_arg_loc.unwrap_or(loc).1),
+        )?;
+        Ok(())
     }
 
     fn infer_expr(
@@ -834,7 +978,6 @@ impl Typechecker {
             return Ok(());
         }
 
-        // If the application heads match, try to equate their arguments
         match (expected, actual) {
             (Type::Var(expected_var), Type::Var(actual_var)) => {
                 self.assert_var_eq(type_variables, expected_var, actual_var, loc)
@@ -844,8 +987,6 @@ impl Typechecker {
                 Ok(())
             }
             (expected, Type::Var(actual_var)) => {
-                // TODO: since expected and actual are swapped here, we get an error message with
-                // swapped "expected" and "actual" fields. Fix this.
                 self.try_solve_type_var(type_variables, actual_var, expected, loc, true)?;
                 Ok(())
             }
@@ -876,6 +1017,7 @@ impl Typechecker {
                     args: args_actual,
                 },
             ) => {
+                // If the application heads match, try to equate their arguments
                 self.assert_type_eq(type_variables, head_expected, head_actual, loc)?;
 
                 assert_eq!(args_expected.len(), args_actual.len());
@@ -1005,11 +1147,12 @@ impl Typechecker {
         debug!("solve: {} = {}", &expected, &actual);
         match type_variables.get_mut(expected) {
             None => {
-                unreachable!();
+                unreachable!("unknown type variable {expected}");
             }
             Some(t) => {
                 match t {
                     VarState::Unsolved => {
+                        debug!("solved {expected}");
                         *t = VarState::Solved((*actual).clone());
                         Ok(true)
                     }
