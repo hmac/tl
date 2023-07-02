@@ -1,8 +1,10 @@
 pub mod ast;
+mod compiler;
 pub mod interpreter;
 mod local_variables;
 pub mod parser;
 pub mod typechecker;
+mod vm;
 
 use std::io;
 use std::io::Write;
@@ -10,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use ast::Decl;
 use interpreter::Interpreter;
+use tracing::{debug, warn};
 
 #[derive(Debug)]
 pub enum Error {
@@ -30,6 +33,7 @@ pub struct Runner<'a> {
     source: String,
     ast: Vec<Decl>,
     interpreter: Interpreter,
+    vm: vm::Vm,
     output: Box<dyn Write + 'a>,
 }
 
@@ -110,11 +114,25 @@ impl<'a> Runner<'a> {
                     }
                 }
 
+                let mut compiler = compiler::Compiler::new();
+
+                for decl in &ast {
+                    match decl {
+                        Decl::Func { name, body, .. } => {
+                            compiler.compile_func(name, &body);
+                        }
+                        _ => {}
+                    }
+                }
+
+                let vm = vm::Vm::from_compiler(compiler);
+
                 Ok(Self {
                     path: path.to_owned(),
                     source,
                     ast,
                     interpreter,
+                    vm,
                     output: Box::new(output),
                 })
             }
@@ -131,6 +149,11 @@ impl<'a> Runner<'a> {
             Decl::Func { name, body, .. } if name == func_name => Some(body),
             _ => None,
         });
+
+        let (iloc, _) = self.vm.functions.get(func_name).unwrap();
+        dbg!(&self.vm.prog);
+        self.vm.run(*iloc).unwrap();
+
         match func {
             Some(func_body) => {
                 match self

@@ -580,7 +580,7 @@ impl Parser {
     /// Desugar `[x, y, ..z]` to `Cons x (Cons y z)`.
     fn desugar_list_cons(elems: Vec<Expr>, list: Expr, loc: Loc) -> Expr {
         elems.into_iter().rfold(list, |l, x| Expr::App {
-            loc: loc,
+            loc,
             head: Box::new(Expr::Var(
                 (x.loc().0, loc.1),
                 Var::Constructor("Cons".to_string()),
