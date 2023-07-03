@@ -205,8 +205,9 @@ impl Compiler {
         // The lifted function takes all its original arguments, plus any (captured?)
         // local variables. The captured variables come first.
         // When the function is called, arguments are pushed onto the stack in reverse order,
-        // so the body's locals are [captured1, ..., capturedN, argN, argN-1, .., arg1]
+        // so the body's locals are [argN, argN-1, ... arg1, capturedN, capturedN-1, ..., captured1]
         let mut body_locals = locals.clone();
+        body_locals.reverse();
         for (_, v) in args {
             body_locals.push(v.to_string())
         }

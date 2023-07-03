@@ -32,9 +32,12 @@ impl Vm {
         let mut frames: Vec<(BlockId, InstLoc, usize)> = vec![];
 
         loop {
-            println!("{:?}", block_id);
-            println!("{ip}: {:?} - {}", &block[ip], display_value_list(&stack));
-            println!("{:?}", &frames);
+            println!(
+                "({}) {ip}: {:?} - {}",
+                &block_id.0,
+                &block[ip],
+                display_value_list(&stack)
+            );
             match &block[ip] {
                 Instruction::AddInt => match (stack.pop().unwrap(), stack.pop().unwrap()) {
                     (Value::Int(x), Value::Int(y)) => {
@@ -143,26 +146,30 @@ impl Vm {
                             mut args,
                         } => {
                             // Check if we've saturated the function
-                            debug!("func name={name} num_args={num_args}");
                             if num_args as usize == args.len() + *len as usize {
+                                debug!(
+                                    "func name={name} num_args={num_args} block_id={} (saturated)",
+                                    func_block_id.0
+                                );
                                 // Push the already-applied args onto the stack
                                 for arg in args.into_iter().rev() {
                                     stack.push(arg);
                                 }
-                                let frame = (block_id, ip + 1, stack.len() - *len as usize);
+                                let frame = (block_id, ip + 1, stack.len() - num_args as usize);
                                 frames.push(frame);
                                 // Jump to the function
                                 block_id = func_block_id;
                                 block = self.prog.get_block(func_block_id);
-                                ip = 0
+                                ip = 0;
                             } else {
+                                debug!("func name={name} num_args={num_args}");
                                 // Push the new args and put the function back on the stack
                                 for _ in 0..*len {
                                     args.push(stack.pop().unwrap());
                                 }
                                 stack.push(Value::Func {
                                     name,
-                                    block_id,
+                                    block_id: func_block_id,
                                     num_args,
                                     args,
                                 });
@@ -184,8 +191,10 @@ impl Vm {
                     // Save the new arguments (how many?)
                     // Overwrite the current frame with new args, dropping any locals
                     // Jump to the start of the function
+                    todo!()
                 }
                 Instruction::Bind(_) => {
+                    todo!()
                     // Store the top of the stack in locals
                 }
                 Instruction::Case(branches) => {
@@ -269,6 +278,20 @@ fn match_pattern<'a>(target: &'a Value, pattern: &Pattern) -> Option<Vec<&'a Val
                     None
                 }
             }
+            Value::Bool(true) => {
+                if name == "True" {
+                    Some(vec![])
+                } else {
+                    None
+                }
+            }
+            Value::Bool(false) => {
+                if name == "False" {
+                    Some(vec![])
+                } else {
+                    None
+                }
+            }
             Value::Constructor {
                 name: target_name,
                 args: target_args,
@@ -288,7 +311,7 @@ fn match_pattern<'a>(target: &'a Value, pattern: &Pattern) -> Option<Vec<&'a Val
                     None
                 }
             }
-            _ => unreachable!(),
+            _ => unreachable!("pattern={pattern:?} target={target:?}"),
         },
         Pattern::Var { loc, name } => Some(vec![target]),
         Pattern::Int { loc, value } => match target {
@@ -333,7 +356,7 @@ impl PartialEq for Value {
             Self::Func { .. } => false,
             Self::Int(n) => match other {
                 Self::Int(m) => n == m,
-                _ => unreachable!(),
+                _ => unreachable!("self: {self:?} other: {other:?}"),
             },
             Self::Bool(n) => match other {
                 Self::Bool(m) => n == m,
@@ -398,8 +421,8 @@ impl std::fmt::Display for Value {
         match self {
             Value::Int(n) => write!(f, "{}", n),
             Value::Bool(b) => write!(f, "{}", b),
-            Value::Func { block_id, .. } => write!(f, "<func({})>", block_id.0),
-            Value::Operator { .. } => write!(f, "<func>"),
+            Value::Func { block_id, name, .. } => write!(f, "<func({}: {name})>", block_id.0),
+            Value::Operator { .. } => write!(f, "<func(op)>"),
             Value::Constructor { name, args } => {
                 write!(f, "{}", name)?;
                 for arg in args {
