@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use tracing::debug;
+
 use crate::ast::{Expr, Loc, Operator, Pattern, Var};
 
 /// Compiles expressions to VM instructions
@@ -7,6 +9,7 @@ pub struct Compiler {
     pub program: Program,
     // name => (start instruction, arg names)
     pub functions: HashMap<String, (BlockId, Vec<String>)>,
+    rng: tinyrand::StdRand,
 }
 
 impl Compiler {
@@ -14,11 +17,11 @@ impl Compiler {
         Self {
             program: Program::new(),
             functions: HashMap::new(),
+            rng: tinyrand::StdRand::default(),
         }
     }
 
     pub fn compile_func(&mut self, name: &str, body: &Expr) -> Result<(), Error> {
-        dbg!(body);
         // If the body is a function, compile it without an additional lambda lift
         // This prevents e.g.
         //
@@ -33,23 +36,26 @@ impl Compiler {
         //
         // f: push_var x; ret
 
-        let (mut ins, args) = match body {
+        let (ins, args) = match body {
             Expr::Func { args, body, .. } => {
-                let ins = self.compile_expr(body, HashSet::new(), true)?;
+                let mut locals = Vec::new();
+                for (_, a) in args.iter().rev() {
+                    locals.push(a.to_string());
+                }
+                let ins = self.compile_expr(body, locals, true)?;
                 (ins, args.iter().map(|(_, n)| n.to_string()).collect())
             }
-            e => (self.compile_expr(e, HashSet::new(), true)?, vec![]),
+            e => (self.compile_expr(e, Vec::new(), true)?, vec![]),
         };
         let id = self.program.add_block(ins);
         self.functions.insert(name.to_string(), (id, args));
-        dbg!(&self.program);
         Ok(())
     }
 
     fn compile_expr(
         &mut self,
         expr: &Expr,
-        locals: HashSet<String>,
+        locals: Vec<String>,
         // true if expr is a leaf node of the function body. This tells us if we need to insert a
         // 'ret' instruction.
         is_leaf: bool,
@@ -57,7 +63,15 @@ impl Compiler {
         let mut ins = vec![];
         match expr {
             Expr::Var(_, Var::Local(v)) => {
-                ins.push(Instruction::PushVar(v.clone()));
+                // Find the innermost matching variable in locals
+                match locals.iter().enumerate().find(|(_, x)| x == &v) {
+                    Some((index, _)) => {
+                        ins.push(Instruction::PushVar(index));
+                    }
+                    None => {
+                        ins.push(Instruction::PushGlobal(v.to_string()));
+                    }
+                }
             }
             Expr::Var(_, Var::Constructor(c)) => {
                 ins.push(Instruction::PushCtor(c.clone()));
@@ -87,7 +101,12 @@ impl Compiler {
                 // Compile each branch, and determine their start locations
                 let mut pattern_locs = vec![];
                 for branch in branches {
-                    let branch_ins = self.compile_expr(&branch.rhs, locals.clone(), is_leaf)?;
+                    let mut locals = locals.clone();
+                    // TODO: add pattern bindings to locals
+                    for var in branch.pattern.ordered_vars() {
+                        locals.push(var);
+                    }
+                    let branch_ins = self.compile_expr(&branch.rhs, locals, is_leaf)?;
                     let branch_id = self.program.add_block(branch_ins);
                     pattern_locs.push((branch.pattern.clone(), branch_id));
                 }
@@ -95,8 +114,13 @@ impl Compiler {
                 ins.push(case);
             }
             Expr::Func { loc, args, body } => {
+                // Lift the function, then apply any captured variables
                 let name = self.lift_func(&locals, args, body)?;
-                ins.push(Instruction::PushVar(name));
+                for (i, _) in locals.iter().enumerate() {
+                    ins.push(Instruction::PushVar(i));
+                }
+                ins.push(Instruction::PushGlobal(name));
+                ins.push(Instruction::Call(locals.len() as u8));
             }
             Expr::App { loc, head, args } => {
                 // Examine head
@@ -115,7 +139,12 @@ impl Compiler {
                         for a in args.iter().rev() {
                             ins.append(&mut self.compile_expr(a, locals.clone(), false)?);
                         }
-                        ins.push(Instruction::PushVar(v.clone()));
+                        // Check if the variable is local or global
+                        let push_inst = match locals.iter().enumerate().find(|(_, x)| x == &v) {
+                            Some((index, _)) => Instruction::PushVar(index),
+                            None => Instruction::PushGlobal(v.clone()),
+                        };
+                        ins.push(push_inst);
                         ins.push(Instruction::Call(args.len() as u8));
                     }
                     Expr::Var(_, Var::Operator(o)) => {
@@ -149,7 +178,7 @@ impl Compiler {
                 let mut locals = locals.clone();
                 for b in bindings {
                     ins.append(&mut self.compile_expr(&b.value, locals.clone(), false)?);
-                    locals.insert(b.name.to_string());
+                    locals.push(b.name.to_string());
                     ins.push(Instruction::Bind(b.name.clone()));
                 }
                 ins.append(&mut self.compile_expr(body, locals, is_leaf)?);
@@ -161,27 +190,39 @@ impl Compiler {
         Ok(ins)
     }
 
-    fn generate_fresh_name(&self) -> String {
+    fn generate_fresh_name(&mut self) -> String {
         use tinyrand::Rand;
 
-        format!("{}", tinyrand::StdRand::default().next_u16())
+        format!("{}", self.rng.next_u16())
     }
 
     fn lift_func(
         &mut self,
-        locals: &HashSet<String>,
+        locals: &Vec<String>,
         args: &[(Loc, String)],
         body: &Expr,
     ) -> Result<String, Error> {
-        let mut all_args: Vec<String> = args.iter().map(|(_, n)| n.to_string()).collect();
-        // TODO: locals need to be a predictable order
-        for l in locals {
-            all_args.push(l.to_string());
+        // The lifted function takes all its original arguments, plus any (captured?)
+        // local variables. The captured variables come first.
+        // When the function is called, arguments are pushed onto the stack in reverse order,
+        // so the body's locals are [captured1, ..., capturedN, argN, argN-1, .., arg1]
+        let mut body_locals = locals.clone();
+        for (_, v) in args {
+            body_locals.push(v.to_string())
         }
-        let ins = self.compile_expr(body, HashSet::new(), true)?;
+        let ins = self.compile_expr(
+            body,
+            {
+                let mut locals = body_locals.clone();
+                locals.reverse();
+                locals
+            },
+            true,
+        )?;
         let block_id = self.program.add_block(ins);
         let name = self.generate_fresh_name();
-        self.functions.insert(name.clone(), (block_id, all_args));
+        self.functions
+            .insert(name.clone(), (block_id, body_locals.to_vec()));
         Ok(name)
     }
 }
@@ -196,7 +237,16 @@ pub enum Instruction {
     MulInt,
     Eq,
     PushInt(i64),
-    PushVar(String),
+    // Push a local variable on to the stack.
+    // The argument is an offset from the stack frame index indicating the location of the variable
+    // on the stack.
+    // Arguments are pushed onto the stack in reverse order, so index 0 will correspond to the last
+    // function argument.
+    // Index 1 will be the next-to-last argument, etc.
+    // After all args, the next index will be the first let-bound or case-bound variable.
+    // This ensures that variable indices do not change as we evaluate a function.
+    PushVar(usize),
+    PushGlobal(String),
     PushCtor(String),
     MakeList(u8),
     Ctor(String, u8),
@@ -207,10 +257,11 @@ pub enum Instruction {
     Ret,
 }
 
+#[derive(Debug)]
 pub enum Error {}
 
 #[derive(Debug, Clone, Copy)]
-pub struct BlockId(usize);
+pub struct BlockId(pub usize);
 
 #[derive(Debug)]
 pub struct Program {

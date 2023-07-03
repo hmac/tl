@@ -3,6 +3,7 @@ mod compiler;
 pub mod interpreter;
 mod local_variables;
 pub mod parser;
+mod stack;
 pub mod typechecker;
 mod vm;
 
@@ -119,7 +120,15 @@ impl<'a> Runner<'a> {
                 for decl in &ast {
                     match decl {
                         Decl::Func { name, body, .. } => {
-                            compiler.compile_func(name, &body);
+                            compiler.compile_func(name, &body).unwrap();
+                        }
+                        Decl::Test { name, body, .. } => {
+                            // Test names may overlap with function names, so do some hacky
+                            // namespacing.
+                            // TODO: proper namespacing for tests
+                            compiler
+                                .compile_func(&format!("test_{name}"), &body)
+                                .unwrap();
                         }
                         _ => {}
                     }
@@ -182,21 +191,24 @@ impl<'a> Runner<'a> {
 
         for decl in &self.ast {
             match decl {
-                Decl::Test { name, body, .. } => {
-                    match self
-                        .interpreter
-                        .eval(&local_variables::LocalVariables::new(), &body)
-                    {
-                        Ok(interpreter::Value::Bool(true)) => {
-                            writeln!(&mut self.output, "{name}: PASS\n")?;
-                        }
-                        Ok(interpreter::Value::Bool(false)) => {
-                            writeln!(&mut self.output, "{name}: FAIL\n")?;
-                            failures += 1;
-                        }
-                        Ok(r) => {
-                            panic!("Unexpected result from test {name}: {r}");
-                        }
+                Decl::Test { name, .. } => {
+                    debug!("running test {name}");
+                    let test_name = format!("test_{name}");
+                    let (block_id, _args) = self.vm.functions.get(&test_name).unwrap();
+                    match self.vm.run(*block_id) {
+                        Ok(result) => match result {
+                            vm::Value::Int(_) => todo!(),
+                            vm::Value::Bool(true) => {
+                                writeln!(&mut self.output, "{name}: PASS\n")?;
+                            }
+                            vm::Value::Bool(false) => {
+                                writeln!(&mut self.output, "{name}: FAIL\n")?;
+                                failures += 1;
+                            }
+                            _ => {
+                                panic!("Unexpected result from test {name}: {result}");
+                            }
+                        },
                         Err(error) => {
                             panic!("Error running test {name}: {error:?}");
                         }

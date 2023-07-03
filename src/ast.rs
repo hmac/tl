@@ -463,6 +463,24 @@ impl Pattern {
             Pattern::Wildcard { .. } => HashSet::new(),
         }
     }
+
+    /// Like `vars` but returns a `Vec<String>` which lists the variables in the order they are
+    /// bound. We define this order as left-to-right and depth-first, so e.g.
+    /// `Cons (Some (Pair x y)) (Cons r z)` has the result `[x, y, r, z]`
+    pub fn ordered_vars(&self) -> Vec<String> {
+        match self {
+            Pattern::Constructor { args, .. } => {
+                let mut vars = vec![];
+                for a in args {
+                    vars.append(&mut a.ordered_vars());
+                }
+                vars
+            }
+            Pattern::Var { name, .. } => vec![name.to_string()],
+            Pattern::Int { .. } => vec![],
+            Pattern::Wildcard { .. } => vec![],
+        }
+    }
 }
 
 impl std::fmt::Display for Pattern {

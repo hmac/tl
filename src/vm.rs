@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::{
-    ast::Operator,
+    ast::{Operator, Pattern},
     compiler::{BlockId, Compiler, InstLoc, Instruction, Program},
 };
 
@@ -22,16 +22,19 @@ impl Vm {
         }
     }
 
-    pub fn run(&self, block_id: BlockId) -> Result<Value, Error> {
+    pub fn run(&self, mut block_id: BlockId) -> Result<Value, Error> {
+        dbg!(&self.prog);
+        dbg!(&self.functions);
         let mut block = self.prog.get_block(block_id);
         let mut ip = 0;
         let mut stack = vec![];
-        // (return address, stack frame index)
-        let mut frames: Vec<(InstLoc, usize)> = vec![];
-        let mut locals: HashMap<String, Value> = HashMap::new();
+        // (return block, return address, stack frame index)
+        let mut frames: Vec<(BlockId, InstLoc, usize)> = vec![];
 
         loop {
-            println!("{:?} - {stack:?}", &block[ip]);
+            println!("{:?}", block_id);
+            println!("{ip}: {:?} - {}", &block[ip], display_value_list(&stack));
+            println!("{:?}", &frames);
             match &block[ip] {
                 Instruction::AddInt => match (stack.pop().unwrap(), stack.pop().unwrap()) {
                     (Value::Int(x), Value::Int(y)) => {
@@ -74,49 +77,59 @@ impl Vm {
                     stack.push(Value::Int(*n));
                     ip += 1;
                 }
-                Instruction::PushVar(v) => {
-                    // The variable is either:
-                    // - local
-                    // - a global function
-                    // - a constructor
-                    let val = if let Some(val) = locals.get(v) {
-                        val.clone()
-                    } else {
-                        if let Some((func_block_id, args)) = self.functions.get(v) {
-                            Value::Func {
-                                name: v.to_string(),
-                                num_args: args.len() as u8,
-                                block_id: *func_block_id,
-                                args: vec![],
-                            }
-                        } else {
-                            Value::Constructor {
-                                name: v.to_string(),
-                                args: vec![],
-                            }
-                        }
+                Instruction::PushGlobal(v) => {
+                    let (func_block_id, args) = self.functions.get(v).unwrap();
+                    let val = Value::Func {
+                        name: v.to_string(),
+                        num_args: args.len() as u8,
+                        block_id: *func_block_id,
+                        args: vec![],
                     };
                     stack.push(val);
                     ip += 1;
                 }
+                Instruction::PushVar(v) => {
+                    // The variable is either:
+                    // - local
+                    // - a constructor
+                    // TODO: can v be a constructor?
+                    // v is an offset from the current stack frame
+                    let frame_index = frames[frames.len() - 1].2;
+                    let val_index = frame_index + v;
+                    debug!("push_var({v}): frame_index={frame_index} val_index={val_index}");
+                    let val = stack[frame_index + v].clone();
+
+                    stack.push(val);
+                    ip += 1;
+                }
                 Instruction::PushCtor(c) => {
-                    todo!()
+                    let val = Value::Constructor {
+                        name: c.to_string(),
+                        args: vec![],
+                    };
+                    stack.push(val);
+                    ip += 1;
                 }
                 Instruction::MakeList(len) => {
                     let mut list = Value::ListNil;
+                    let mut elems = vec![];
                     for _ in 0..*len {
-                        list = Value::ListCons(Box::new(stack.pop().unwrap()), Box::new(list));
+                        elems.push(stack.pop().expect("MakeList: empty stack"));
+                    }
+                    elems.reverse();
+                    for e in elems {
+                        list = Value::ListCons(Box::new(e), Box::new(list));
                     }
                     stack.push(list);
                     ip += 1;
                 }
                 Instruction::Ctor(c, len) => {
-                    let new_stack = stack.split_off(*len as usize);
+                    let mut args = stack.split_off(stack.len() - *len as usize);
+                    args.reverse();
                     let val = Value::Constructor {
                         name: c.to_string(),
-                        args: stack,
+                        args,
                     };
-                    stack = new_stack;
                     stack.push(val);
                     ip += 1;
                 }
@@ -125,20 +138,22 @@ impl Vm {
                     match stack.pop().unwrap() {
                         Value::Func {
                             name,
-                            block_id,
+                            block_id: func_block_id,
                             num_args,
                             mut args,
                         } => {
                             // Check if we've saturated the function
+                            debug!("func name={name} num_args={num_args}");
                             if num_args as usize == args.len() + *len as usize {
                                 // Push the already-applied args onto the stack
                                 for arg in args.into_iter().rev() {
                                     stack.push(arg);
                                 }
-                                let frame = (ip + 1, stack.len() - *len as usize);
+                                let frame = (block_id, ip + 1, stack.len() - *len as usize);
                                 frames.push(frame);
                                 // Jump to the function
-                                block = self.prog.get_block(block_id);
+                                block_id = func_block_id;
+                                block = self.prog.get_block(func_block_id);
                                 ip = 0
                             } else {
                                 // Push the new args and put the function back on the stack
@@ -173,15 +188,39 @@ impl Vm {
                 Instruction::Bind(_) => {
                     // Store the top of the stack in locals
                 }
-                Instruction::Case(_) => {
+                Instruction::Case(branches) => {
                     // Match the top of the stack against each pattern
                     // If there's a match, jump to the corresponding location
+                    let target = stack.pop().expect("case: empty stack");
+                    match eval_case(&target, &branches) {
+                        Some((new_block_id, bindings)) => {
+                            // Push any values bound by the pattern
+                            for v in bindings {
+                                stack.push(v.clone());
+                            }
+                            // Jump to the branch
+                            // We're jumping to a new block but not calling a function, so we don't
+                            // push a new stack frame but we need to update the current one to
+                            // record our new block id.
+                            block_id = new_block_id;
+
+                            block = self.prog.get_block(new_block_id);
+                            ip = 0;
+                        }
+                        None => {
+                            todo!("No matching case branch");
+                        }
+                    }
                 }
                 Instruction::Ret => {
                     let result = stack.pop().expect("ret: empty stack");
-                    if let Some((ret_loc, frame_index)) = frames.pop() {
-                        ip = ret_loc;
-                        stack.split_off(frame_index + 1);
+                    if let Some((caller_block_id, caller_addr, frame_index)) = frames.pop() {
+                        stack.split_off(frame_index);
+                        stack.push(result);
+
+                        block_id = caller_block_id;
+                        block = self.prog.get_block(block_id);
+                        ip = caller_addr;
                     } else {
                         // We're at the top level. Return the result.
                         return Ok(result);
@@ -189,6 +228,74 @@ impl Vm {
                 }
             }
         }
+    }
+}
+
+fn eval_case<'a>(
+    target: &'a Value,
+    branches: &[(Pattern, BlockId)],
+) -> Option<(BlockId, Vec<&'a Value>)> {
+    for (pattern, block_id) in branches {
+        match match_pattern(target, pattern) {
+            Some(bound_values) => {
+                return Some((*block_id, bound_values));
+            }
+            None => {}
+        }
+    }
+    None
+}
+
+fn match_pattern<'a>(target: &'a Value, pattern: &Pattern) -> Option<Vec<&'a Value>> {
+    match pattern {
+        Pattern::Constructor { loc, name, args } => match target {
+            Value::ListCons(x, xs) => {
+                if name == "Cons" {
+                    match (match_pattern(x, &args[0]), match_pattern(xs, &args[1])) {
+                        (Some(mut x_bound), Some(mut xs_bound)) => {
+                            x_bound.append(&mut xs_bound);
+                            Some(x_bound)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            Value::ListNil => {
+                if name == "Nil" {
+                    Some(vec![])
+                } else {
+                    None
+                }
+            }
+            Value::Constructor {
+                name: target_name,
+                args: target_args,
+            } => {
+                if name == target_name {
+                    assert_eq!(args.len(), target_args.len());
+                    let mut bindings = vec![];
+                    for (val, pattern) in target_args.iter().zip(args) {
+                        if let Some(mut new_bindings) = match_pattern(val, pattern) {
+                            bindings.append(&mut new_bindings);
+                        } else {
+                            return None;
+                        }
+                    }
+                    Some(bindings)
+                } else {
+                    None
+                }
+            }
+            _ => unreachable!(),
+        },
+        Pattern::Var { loc, name } => Some(vec![target]),
+        Pattern::Int { loc, value } => match target {
+            Value::Int(n) if n == value => Some(vec![]),
+            _ => None,
+        },
+        Pattern::Wildcard { loc } => Some(vec![]),
     }
 }
 
@@ -230,7 +337,7 @@ impl PartialEq for Value {
             },
             Self::Bool(n) => match other {
                 Self::Bool(m) => n == m,
-                _ => unreachable!(),
+                _ => unreachable!("self: {self:?} other: {other:?}"),
             },
             Self::Operator {
                 op: op_l,
@@ -251,6 +358,12 @@ impl PartialEq for Value {
                     args: args_r,
                 } => name_l == name_r && args_l == args_r,
                 Self::ListNil => name_l == "Nil",
+                Self::ListCons(arg1, arg2) => {
+                    name_l == "Cons"
+                        && args_l.len() == 2
+                        && args_l[0] == **arg1
+                        && args_l[1] == **arg2
+                }
                 _ => unreachable!("{:?} == {:?}", self, other),
             },
             Self::ListNil => match other {
@@ -268,12 +381,24 @@ impl PartialEq for Value {
     }
 }
 
+fn display_value_list(list: &Vec<Value>) -> String {
+    let mut r = "[".to_string();
+    for (i, e) in list.iter().enumerate() {
+        r.push_str(&e.to_string());
+        if i < list.len() - 1 {
+            r.push_str(", ");
+        }
+    }
+    r.push_str("]");
+    r
+}
+
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             Value::Int(n) => write!(f, "{}", n),
             Value::Bool(b) => write!(f, "{}", b),
-            Value::Func { .. } => write!(f, "<func>"),
+            Value::Func { block_id, .. } => write!(f, "<func({})>", block_id.0),
             Value::Operator { .. } => write!(f, "<func>"),
             Value::Constructor { name, args } => {
                 write!(f, "{}", name)?;
