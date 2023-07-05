@@ -1,6 +1,8 @@
 #[cfg(test)]
 #[test]
 fn fixtures() {
+    tracing_subscriber::fmt::try_init();
+
     let type_error_fixtures = std::fs::read_dir("fixtures/type_errors").unwrap();
     let interpreter_fixtures = std::fs::read_dir("fixtures/interpreter").unwrap();
 
@@ -53,6 +55,8 @@ fn fixtures() {
 #[cfg(test)]
 #[test]
 fn tests() {
+    tracing_subscriber::fmt::try_init();
+
     let test_fixtures = std::fs::read_dir("fixtures/tests").unwrap();
 
     let mut num_failures = 0;

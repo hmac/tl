@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use ast::Decl;
 use interpreter::Interpreter;
-use tracing::{debug, warn};
+use tracing::debug;
 
 #[derive(Debug)]
 pub enum Error {
@@ -153,30 +153,16 @@ impl<'a> Runner<'a> {
         }
     }
 
-    pub fn run(&mut self, func_name: &str) -> Result<interpreter::Value, Error> {
-        let func = &self.ast.iter().find_map(|decl| match decl {
-            Decl::Func { name, body, .. } if name == func_name => Some(body),
-            _ => None,
-        });
-
-        let (iloc, _) = self.vm.functions.get(func_name).unwrap();
-        dbg!(&self.vm.prog);
-        self.vm.run(*iloc).unwrap();
-
-        match func {
-            Some(func_body) => {
-                match self
-                    .interpreter
-                    .eval(&local_variables::LocalVariables::new(), func_body)
-                {
-                    Ok(value) => Ok(value),
-                    Err(error) => {
-                        writeln!(&mut self.output, "Error:\n")?;
-                        writeln!(&mut self.output, "{:?}", error)?;
-                        Err(Error::Eval)
-                    }
+    pub fn run(&mut self, func_name: &str) -> Result<vm::Value, Error> {
+        match self.vm.functions.get(func_name) {
+            Some((func_instr_loc, _)) => match self.vm.run(*func_instr_loc) {
+                Ok(value) => Ok(value),
+                Err(error) => {
+                    writeln!(&mut self.output, "Error:\n")?;
+                    writeln!(&mut self.output, "{:?}", error)?;
+                    Err(Error::Eval)
                 }
-            }
+            },
             None => {
                 let error = interpreter::Error::UndefinedVariable(func_name.to_string());
                 writeln!(&mut self.output, "Error:\n")?;

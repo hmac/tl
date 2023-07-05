@@ -23,8 +23,6 @@ impl Vm {
     }
 
     pub fn run(&self, mut block_id: BlockId) -> Result<Value, Error> {
-        dbg!(&self.prog);
-        dbg!(&self.functions);
         let mut block = self.prog.get_block(block_id);
         let mut ip = 0;
         let mut stack = vec![];
@@ -32,13 +30,9 @@ impl Vm {
         let mut frames: Vec<(BlockId, InstLoc, usize)> = vec![];
 
         loop {
-            println!(
-                "({}) {ip}: {:?} - {}",
-                &block_id.0,
-                &block[ip],
-                display_value_list(&stack)
-            );
-            match &block[ip] {
+            let instruction = &block[ip];
+            debug!("({}) {ip}: {:?}", &block_id.0, instruction);
+            match instruction {
                 Instruction::AddInt => match (stack.pop().unwrap(), stack.pop().unwrap()) {
                     (Value::Int(x), Value::Int(y)) => {
                         stack.push(Value::Int(x + y));
@@ -77,6 +71,7 @@ impl Vm {
                 }
 
                 Instruction::PushInt(n) => {
+                    debug!("push_int({n})");
                     stack.push(Value::Int(*n));
                     ip += 1;
                 }
@@ -97,7 +92,12 @@ impl Vm {
                     // - a constructor
                     // TODO: can v be a constructor?
                     // v is an offset from the current stack frame
-                    let frame_index = frames[frames.len() - 1].2;
+                    debug!("push_var({v}): frames.len()={}", frames.len());
+                    let frame_index = if frames.is_empty() {
+                        0
+                    } else {
+                        frames[frames.len() - 1].2
+                    };
                     let val_index = frame_index + v;
                     debug!("push_var({v}): frame_index={frame_index} val_index={val_index}");
                     let val = stack[frame_index + v].clone();
@@ -136,9 +136,19 @@ impl Vm {
                     stack.push(val);
                     ip += 1;
                 }
-                Instruction::Call(len) => {
+                Instruction::Call(_remove) => {
                     // The top of the stack holds either a constructor or a function.
-                    match stack.pop().unwrap() {
+                    let func_or_ctor = stack.pop().unwrap();
+
+                    // The next element in the stack holds the number of args in this call
+                    let len: usize = match stack.pop() {
+                        Some(Value::Int(n)) => n as usize,
+                        _ => unreachable!(),
+                    };
+
+                    debug!("call({len})");
+
+                    match func_or_ctor {
                         Value::Func {
                             name,
                             block_id: func_block_id,
@@ -146,7 +156,7 @@ impl Vm {
                             mut args,
                         } => {
                             // Check if we've saturated the function
-                            if num_args as usize == args.len() + *len as usize {
+                            if num_args as usize == args.len() + len {
                                 debug!(
                                     "func name={name} num_args={num_args} block_id={} (saturated)",
                                     func_block_id.0
@@ -162,23 +172,92 @@ impl Vm {
                                 block = self.prog.get_block(func_block_id);
                                 ip = 0;
                             } else {
-                                debug!("func name={name} num_args={num_args}");
-                                // Push the new args and put the function back on the stack
-                                for _ in 0..*len {
-                                    args.push(stack.pop().unwrap());
+                                if (num_args as usize) < args.len() + len {
+                                    debug!(
+                                        "func name={name} num_args={num_args} block_id={} (oversaturated)",
+                                        func_block_id.0
+                                    );
+                                    // num_args may be less than args.len() + len if the function
+                                    // returns another function. We handle this by:
+                                    // - supplying as many args as needed to saturate the current function
+                                    // - evaluating its body
+                                    // - returning to here to apply the remaining args, possible
+                                    //   re-evaluating if the returned function is also saturated.
+
+                                    // After calling the function we want to return to here,
+                                    // as the function will return another function that we then
+                                    // want to call. However upon returning to here, `len` will be
+                                    // incorrect (as it refers to the number of originally-applied
+                                    // args, not the number of remaining args.
+                                    // In Kite we solved this by storing `len` on the stack (via
+                                    // PushInt) prior to the `Call` instruction. Maybe we want to
+                                    // do the same here?
+
+                                    // When the function returns, we want the stack to look like
+                                    // argN
+                                    // argN-1
+                                    // ...
+                                    // argM+1
+                                    // len (N-M)
+                                    // return value
+
+                                    // So first we pop all the args that the called function will
+                                    // use.
+
+                                    let num_extra_args = num_args as usize - args.len();
+                                    let mut extra_args = vec![];
+                                    for _ in 0..num_extra_args {
+                                        extra_args.push(stack.pop().unwrap());
+                                    }
+
+                                    debug!("arg len stack index: {}", stack.len());
+
+                                    // Then we push the new len (len - num_args) onto the stack,
+                                    // then push the args required to saturate the function
+                                    // (arg0..argM).
+                                    stack.push(Value::Int((len - num_args as usize) as i64));
+
+                                    // Then we push the already-applied args onto the stack
+                                    for arg in args.into_iter().rev() {
+                                        stack.push(arg);
+                                    }
+
+                                    // Then we push the additional args supplied in this call
+                                    for arg in extra_args {
+                                        stack.push(arg);
+                                    }
+
+                                    debug!("arg0 stack index: {}", stack.len());
+
+                                    // Construct the new frame
+                                    let frame = (block_id, ip, stack.len() - num_args as usize);
+
+                                    debug!("frame: {:?}", frame);
+                                    frames.push(frame);
+
+                                    // Jump to the function
+                                    block_id = func_block_id;
+                                    block = self.prog.get_block(func_block_id);
+                                    ip = 0;
+                                } else {
+                                    debug!("func name={name} num_args={num_args}");
+                                    // Push the new args and put the function back on the stack
+                                    for _ in 0..len {
+                                        args.push(stack.pop().unwrap());
+                                    }
+                                    stack.push(Value::Func {
+                                        name,
+                                        block_id: func_block_id,
+                                        num_args,
+                                        args,
+                                    });
+                                    ip += 1;
                                 }
-                                stack.push(Value::Func {
-                                    name,
-                                    block_id: func_block_id,
-                                    num_args,
-                                    args,
-                                });
-                                ip += 1;
                             }
                         }
                         Value::Constructor { name, mut args } => {
                             // Push the new args onto the constructor
-                            for _ in 0..*len {
+                            for _ in 0..len {
                                 args.push(stack.pop().unwrap());
                             }
                             stack.push(Value::Constructor { name, args });
@@ -193,16 +272,13 @@ impl Vm {
                     // Jump to the start of the function
                     todo!()
                 }
-                Instruction::Bind(_) => {
-                    todo!()
-                    // Store the top of the stack in locals
-                }
                 Instruction::Case(branches) => {
                     // Match the top of the stack against each pattern
                     // If there's a match, jump to the corresponding location
                     let target = stack.pop().expect("case: empty stack");
                     match eval_case(&target, &branches) {
                         Some((new_block_id, bindings)) => {
+                            debug!("case: {bindings:?}");
                             // Push any values bound by the pattern
                             for v in bindings {
                                 stack.push(v.clone());
@@ -224,6 +300,7 @@ impl Vm {
                 Instruction::Ret => {
                     let result = stack.pop().expect("ret: empty stack");
                     if let Some((caller_block_id, caller_addr, frame_index)) = frames.pop() {
+                        debug!("ret caller_block_id={} caller_addr={caller_addr} frame_index={frame_index} stack={}", caller_block_id.0, display_value_list(&stack));
                         stack.split_off(frame_index);
                         stack.push(result);
 
@@ -337,6 +414,7 @@ pub enum Value {
         num_args: u8,
         args: Vec<Value>,
     },
+    // TODO: can we remove this?
     Operator {
         op: Operator,
         applied_args: Vec<Value>,

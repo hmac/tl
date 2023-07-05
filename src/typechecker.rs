@@ -446,11 +446,9 @@ impl Typechecker {
                 let head_type = match head_type {
                     Type::Func(_, _) => head_type,
                     Type::Var(ref v) => {
-                        dbg!(v);
                         // Generate new vars a, b and unify v with a -> b
                         let domain = self.make_fresh_var(type_variables);
                         let range = self.make_fresh_var(type_variables);
-                        dbg!(&domain, &range);
                         let func_type = Type::Func(Box::new(domain), Box::new(range));
                         self.assert_type_eq(type_variables, expected_type, &func_type, *loc)?;
                         match type_variables.get_mut(v) {

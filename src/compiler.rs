@@ -14,11 +14,84 @@ pub struct Compiler {
 
 impl Compiler {
     pub fn new() -> Self {
-        Self {
+        let mut _self = Self {
             program: Program::new(),
             functions: HashMap::new(),
             rng: tinyrand::StdRand::default(),
-        }
+        };
+
+        _self.compile_operators();
+
+        _self
+    }
+
+    fn compile_operators(&mut self) {
+        // Compile an instruction sequence for each operator so they can be used as first-class
+        // functions.
+        self.compile_func(
+            "+",
+            &Expr::Func {
+                loc: (0, 0),
+                args: vec![((0, 0), "x".to_string()), ((0, 0), "y".to_string())],
+                body: Box::new(Expr::App {
+                    loc: (0, 0),
+                    head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Add))),
+                    args: vec![
+                        Expr::Var((0, 0), Var::Local("x".to_string())),
+                        Expr::Var((0, 0), Var::Local("y".to_string())),
+                    ],
+                }),
+            },
+        )
+        .unwrap();
+        self.compile_func(
+            "-",
+            &Expr::Func {
+                loc: (0, 0),
+                args: vec![((0, 0), "x".to_string()), ((0, 0), "y".to_string())],
+                body: Box::new(Expr::App {
+                    loc: (0, 0),
+                    head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Sub))),
+                    args: vec![
+                        Expr::Var((0, 0), Var::Local("x".to_string())),
+                        Expr::Var((0, 0), Var::Local("y".to_string())),
+                    ],
+                }),
+            },
+        )
+        .unwrap();
+        self.compile_func(
+            "*",
+            &Expr::Func {
+                loc: (0, 0),
+                args: vec![((0, 0), "x".to_string()), ((0, 0), "y".to_string())],
+                body: Box::new(Expr::App {
+                    loc: (0, 0),
+                    head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Mul))),
+                    args: vec![
+                        Expr::Var((0, 0), Var::Local("x".to_string())),
+                        Expr::Var((0, 0), Var::Local("y".to_string())),
+                    ],
+                }),
+            },
+        )
+        .unwrap();
+        self.compile_func(
+            "==",
+            &Expr::Func {
+                loc: (0, 0),
+                args: vec![((0, 0), "x".to_string()), ((0, 0), "y".to_string())],
+                body: Box::new(Expr::App {
+                    loc: (0, 0),
+                    head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Eq))),
+                    args: vec![
+                        Expr::Var((0, 0), Var::Local("x".to_string())),
+                        Expr::Var((0, 0), Var::Local("y".to_string())),
+                    ],
+                }),
+            },
+        )
+        .unwrap();
     }
 
     pub fn compile_func(&mut self, name: &str, body: &Expr) -> Result<(), Error> {
@@ -78,10 +151,10 @@ impl Compiler {
             }
             Expr::Var(_, Var::Operator(op)) => {
                 ins.push(match op {
-                    Operator::Add => Instruction::AddInt,
-                    Operator::Sub => Instruction::SubInt,
-                    Operator::Mul => Instruction::MulInt,
-                    Operator::Eq => Instruction::Eq,
+                    Operator::Add => Instruction::PushGlobal("+".to_string()),
+                    Operator::Sub => Instruction::PushGlobal("-".to_string()),
+                    Operator::Mul => Instruction::PushGlobal("*".to_string()),
+                    Operator::Eq => Instruction::PushGlobal("==".to_string()),
                 });
             }
             Expr::Int(_, i) => {
@@ -119,6 +192,7 @@ impl Compiler {
                 for (i, _) in locals.iter().enumerate() {
                     ins.push(Instruction::PushVar(i));
                 }
+                ins.push(Instruction::PushInt(locals.len() as i64));
                 ins.push(Instruction::PushGlobal(name));
                 ins.push(Instruction::Call(locals.len() as u8));
             }
@@ -144,6 +218,7 @@ impl Compiler {
                             Some((index, _)) => Instruction::PushVar(index),
                             None => Instruction::PushGlobal(v.clone()),
                         };
+                        ins.push(Instruction::PushInt(args.len() as i64));
                         ins.push(push_inst);
                         ins.push(Instruction::Call(args.len() as u8));
                     }
@@ -158,20 +233,7 @@ impl Compiler {
                             Operator::Eq => Instruction::Eq,
                         });
                     }
-                    Expr::Int(_, _) => todo!(),
-                    Expr::List(_, _) => todo!(),
-                    Expr::Case {
-                        loc,
-                        target,
-                        branches,
-                    } => todo!(),
-                    Expr::Func { loc, args, body } => todo!(),
-                    Expr::App { loc, head, args } => todo!(),
-                    Expr::Let {
-                        loc,
-                        bindings,
-                        body,
-                    } => todo!(),
+                    _ => todo!(),
                 }
             }
             Expr::Let { bindings, body, .. } => {
@@ -179,7 +241,6 @@ impl Compiler {
                 for b in bindings {
                     ins.append(&mut self.compile_expr(&b.value, locals.clone(), false)?);
                     locals.push(b.name.to_string());
-                    ins.push(Instruction::Bind(b.name.clone()));
                 }
                 ins.append(&mut self.compile_expr(body, locals, is_leaf)?);
             }
@@ -253,7 +314,6 @@ pub enum Instruction {
     Ctor(String, u8),
     Call(u8),
     TailCall,
-    Bind(String),
     Case(Vec<(Pattern, BlockId)>),
     Ret,
 }
