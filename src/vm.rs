@@ -26,12 +26,28 @@ impl Vm {
         let mut block = self.prog.get_block(block_id);
         let mut ip = 0;
         let mut stack = vec![];
-        // (return block, return address, stack frame index)
-        let mut frames: Vec<(BlockId, InstLoc, usize)> = vec![];
+        // (function block, return block, return address, stack frame index)
+        let mut frames: Vec<(BlockId, BlockId, InstLoc, usize)> = vec![];
+
+        // We store two block IDs in each frame: the function block and the return block.
+        // On function entry these are the same, and point to the block which called the current
+        // function.
+        // If we then call a function from the RHS of a case expression, we want to return to the
+        // correct block (the RHS) when that function returns, rather than to the original function
+        // block. So before jumping we update the return address to hold the ID of the RHS block.
+        // We still need the ID of the original function block to implement tail calls. That's why
+        // we have both.
+        let mut current_function_block_id = block_id;
 
         loop {
             let instruction = &block[ip];
-            debug!("({}) {ip}: {:?}", &block_id.0, instruction);
+            debug!(
+                "({}) {ip}: {:?} {} {:?}",
+                &block_id.0,
+                instruction,
+                display_value_list(&stack),
+                &frames
+            );
             match instruction {
                 Instruction::AddInt => match (stack.pop().unwrap(), stack.pop().unwrap()) {
                     (Value::Int(x), Value::Int(y)) => {
@@ -93,10 +109,9 @@ impl Vm {
                     // TODO: can v be a constructor?
                     // v is an offset from the current stack frame
                     debug!("push_var({v}): frames.len()={}", frames.len());
-                    let frame_index = if frames.is_empty() {
-                        0
-                    } else {
-                        frames[frames.len() - 1].2
+                    let frame_index = match frames.last() {
+                        Some((_, _, _, i)) => *i,
+                        None => 0,
                     };
                     let val_index = frame_index + v;
                     debug!("push_var({v}): frame_index={frame_index} val_index={val_index}");
@@ -172,10 +187,16 @@ impl Vm {
                                 for arg in args.into_iter().rev() {
                                     stack.push(arg);
                                 }
-                                let frame = (block_id, ip + 1, stack.len() - num_args as usize);
+                                let frame = (
+                                    current_function_block_id,
+                                    block_id,
+                                    ip + 1,
+                                    stack.len() - num_args as usize,
+                                );
                                 frames.push(frame);
                                 // Jump to the function
                                 block_id = func_block_id;
+                                current_function_block_id = func_block_id;
                                 block = self.prog.get_block(func_block_id);
                                 ip = 0;
                             } else {
@@ -237,13 +258,19 @@ impl Vm {
                                     debug!("arg0 stack index: {}", stack.len());
 
                                     // Construct the new frame
-                                    let frame = (block_id, ip, stack.len() - num_args as usize);
+                                    let frame = (
+                                        current_function_block_id,
+                                        block_id,
+                                        ip,
+                                        stack.len() - num_args as usize,
+                                    );
 
                                     debug!("frame: {:?}", frame);
                                     frames.push(frame);
 
                                     // Jump to the function
                                     block_id = func_block_id;
+                                    current_function_block_id = func_block_id;
                                     block = self.prog.get_block(func_block_id);
                                     ip = 0;
                                 } else {
@@ -274,10 +301,38 @@ impl Vm {
                     }
                 }
                 Instruction::TailCall => {
-                    // Save the new arguments (how many?)
-                    // Overwrite the current frame with new args, dropping any locals
-                    // Jump to the start of the function
-                    todo!()
+                    debug!("tail_call");
+                    // The stack layout is the same as for a normal call instruction
+                    // except the function isn't on the stack.
+
+                    // Pop the argument length, then all the arguments.
+                    let num_args = match stack.pop().unwrap() {
+                        Value::Int(n) => n,
+                        _ => unreachable!(),
+                    };
+
+                    let mut args = vec![];
+                    for _ in 0..num_args {
+                        args.push(stack.pop().unwrap());
+                    }
+
+                    let frame_index = match frames.last() {
+                        Some((_, _, _, i)) => *i,
+                        None => 0,
+                    };
+
+                    // Clear the stack up to the current stack frame index.
+                    stack.split_off(frame_index);
+
+                    // Push the arguments back on
+                    for arg in args.into_iter().rev() {
+                        stack.push(arg);
+                    }
+
+                    // Jump to the start of the current function
+                    block_id = current_function_block_id;
+                    block = self.prog.get_block(block_id);
+                    ip = 0;
                 }
                 Instruction::Case(branches) => {
                     // Match the top of the stack against each pattern
@@ -306,13 +361,16 @@ impl Vm {
                 }
                 Instruction::Ret => {
                     let result = stack.pop().expect("ret: empty stack");
-                    if let Some((caller_block_id, caller_addr, frame_index)) = frames.pop() {
-                        debug!("ret caller_block_id={} caller_addr={caller_addr} frame_index={frame_index} stack={}", caller_block_id.0, display_value_list(&stack));
+                    if let Some((caller_func_block_id, caller_block_id, caller_addr, frame_index)) =
+                        frames.pop()
+                    {
+                        debug!("ret caller_func_block_id={}, caller_block_id={} caller_addr={caller_addr} frame_index={frame_index} stack={}", caller_func_block_id.0, caller_block_id.0, display_value_list(&stack));
                         stack.split_off(frame_index);
                         stack.push(result);
 
                         block_id = caller_block_id;
                         block = self.prog.get_block(block_id);
+                        current_function_block_id = caller_func_block_id;
                         ip = caller_addr;
                     } else {
                         // We're at the top level. Return the result.
