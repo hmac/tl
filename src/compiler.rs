@@ -142,11 +142,15 @@ impl Compiler {
                         ins.push(Instruction::PushVar(index));
                     }
                     None => {
+                        // Call the global to ensure it is evaluated to normal form
+                        ins.push(Instruction::PushInt(0));
                         ins.push(Instruction::PushGlobal(v.to_string()));
+                        ins.push(Instruction::Call(0));
                     }
                 }
             }
             Expr::Var(_, Var::Constructor(c)) => {
+                debug!("{:?}", c);
                 ins.push(Instruction::PushCtor(c.clone()));
             }
             Expr::Var(_, Var::Operator(op)) => {
@@ -204,6 +208,7 @@ impl Compiler {
                 // If it is a complex expression, compile that first
                 match &**head {
                     Expr::Var(_, Var::Constructor(c)) => {
+                        debug!("head: {:?}", c);
                         for a in args.iter().rev() {
                             ins.append(&mut self.compile_expr(a, locals.clone(), false)?);
                         }

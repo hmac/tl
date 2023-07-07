@@ -129,9 +129,16 @@ impl Vm {
                 Instruction::Ctor(c, len) => {
                     let mut args = stack.split_off(stack.len() - *len as usize);
                     args.reverse();
-                    let val = Value::Constructor {
-                        name: c.to_string(),
-                        args,
+                    let val = if c == "Cons" {
+                        assert_eq!(args.len(), 2);
+                        let arg1 = args.pop().unwrap();
+                        let arg0 = args.pop().unwrap();
+                        Value::ListCons(Box::new(arg0), Box::new(arg1))
+                    } else {
+                        Value::Constructor {
+                            name: c.to_string(),
+                            args,
+                        }
                     };
                     stack.push(val);
                     ip += 1;
