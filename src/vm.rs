@@ -143,7 +143,7 @@ impl Vm {
                     stack.push(val);
                     ip += 1;
                 }
-                Instruction::Call(_remove) => {
+                Instruction::Call => {
                     // The top of the stack holds either a constructor or a function.
                     let func_or_ctor = stack.pop().unwrap();
 

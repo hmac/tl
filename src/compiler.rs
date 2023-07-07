@@ -145,7 +145,7 @@ impl Compiler {
                         // Call the global to ensure it is evaluated to normal form
                         ins.push(Instruction::PushInt(0));
                         ins.push(Instruction::PushGlobal(v.to_string()));
-                        ins.push(Instruction::Call(0));
+                        ins.push(Instruction::Call);
                     }
                 }
             }
@@ -198,7 +198,7 @@ impl Compiler {
                 }
                 ins.push(Instruction::PushInt(locals.len() as i64));
                 ins.push(Instruction::PushGlobal(name));
-                ins.push(Instruction::Call(locals.len() as u8));
+                ins.push(Instruction::Call);
             }
             Expr::App { loc, head, args } => {
                 // Examine head
@@ -225,7 +225,7 @@ impl Compiler {
                         };
                         ins.push(Instruction::PushInt(args.len() as i64));
                         ins.push(push_inst);
-                        ins.push(Instruction::Call(args.len() as u8));
+                        ins.push(Instruction::Call);
                     }
                     Expr::Var(_, Var::Operator(o)) => {
                         for a in args.iter().rev() {
@@ -317,7 +317,10 @@ pub enum Instruction {
     PushCtor(String),
     MakeList(u8),
     Ctor(String, u8),
-    Call(u8),
+    // At the time of execution of Call, the topmost stack element must the function to call,
+    // and the next element must be the number of args being provided to the call.
+    // After that, the next elements on the stack should be the arguments.
+    Call,
     TailCall,
     Case(Vec<(Pattern, BlockId)>),
     Ret,
