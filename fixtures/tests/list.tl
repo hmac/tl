@@ -248,10 +248,9 @@ test permutations_empty {
   == (permutations []) [[]]
 }
 
-// This causes a stack overflow
-// test permutations_large {
-//   == (permutations [1, 2, 3, 4, 5, 6]) []
-// }
+test permutations_large {
+  == (len (permutations [1, 2, 3, 4, 5, 6])) 720
+}
 
 concat : List (List a) -> List a {
   foldr (x y -> foldr (a xs -> [a, ..xs]) y x) []

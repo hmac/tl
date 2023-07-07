@@ -12,7 +12,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use ast::Decl;
-use interpreter::Interpreter;
 use tracing::debug;
 
 #[derive(Debug)]
@@ -33,7 +32,6 @@ pub struct Runner<'a> {
     path: PathBuf,
     source: String,
     ast: Vec<Decl>,
-    interpreter: Interpreter,
     vm: vm::Vm,
     output: Box<dyn Write + 'a>,
 }
@@ -104,17 +102,6 @@ impl<'a> Runner<'a> {
                     }
                 }
 
-                let mut interpreter = interpreter::Interpreter::new();
-
-                for decl in &ast {
-                    match decl {
-                        Decl::Func { name, body, .. } => {
-                            interpreter.register_func(name, &body);
-                        }
-                        _ => {}
-                    }
-                }
-
                 let mut compiler = compiler::Compiler::new();
 
                 for decl in &ast {
@@ -140,7 +127,6 @@ impl<'a> Runner<'a> {
                     path: path.to_owned(),
                     source,
                     ast,
-                    interpreter,
                     vm,
                     output: Box::new(output),
                 })

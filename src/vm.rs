@@ -322,7 +322,7 @@ impl Vm {
                     };
 
                     // Clear the stack up to the current stack frame index.
-                    stack.split_off(frame_index);
+                    stack.truncate(frame_index);
 
                     // Push the arguments back on
                     for arg in args.into_iter().rev() {
@@ -365,7 +365,7 @@ impl Vm {
                         frames.pop()
                     {
                         debug!("ret caller_func_block_id={}, caller_block_id={} caller_addr={caller_addr} frame_index={frame_index} stack={}", caller_func_block_id.0, caller_block_id.0, display_value_list(&stack));
-                        stack.split_off(frame_index);
+                        stack.truncate(frame_index);
                         stack.push(result);
 
                         block_id = caller_block_id;
@@ -399,7 +399,7 @@ fn eval_case<'a>(
 
 fn match_pattern<'a>(target: &'a Value, pattern: &Pattern) -> Option<Vec<&'a Value>> {
     match pattern {
-        Pattern::Constructor { loc, name, args } => match target {
+        Pattern::Constructor { name, args, .. } => match target {
             Value::ListCons(x, xs) => {
                 if name == "Cons" {
                     match (match_pattern(x, &args[0]), match_pattern(xs, &args[1])) {
@@ -455,12 +455,12 @@ fn match_pattern<'a>(target: &'a Value, pattern: &Pattern) -> Option<Vec<&'a Val
             }
             _ => unreachable!("pattern={pattern:?} target={target:?}"),
         },
-        Pattern::Var { loc, name } => Some(vec![target]),
-        Pattern::Int { loc, value } => match target {
+        Pattern::Var { .. } => Some(vec![target]),
+        Pattern::Int { value, .. } => match target {
             Value::Int(n) if n == value => Some(vec![]),
             _ => None,
         },
-        Pattern::Wildcard { loc } => Some(vec![]),
+        Pattern::Wildcard { .. } => Some(vec![]),
     }
 }
 

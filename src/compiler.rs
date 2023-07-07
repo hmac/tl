@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use tracing::debug;
 
@@ -122,7 +122,7 @@ impl Compiler {
                 let case = Instruction::Case(pattern_locs);
                 ins.push(case);
             }
-            Expr::Func { loc, args, body } => {
+            Expr::Func { args, body, .. } => {
                 // Lift the function, then apply any captured variables
                 let name = self.lift_func(&locals, args, body)?;
                 for (i, _) in locals.iter().enumerate() {
@@ -132,7 +132,7 @@ impl Compiler {
                 ins.push(Instruction::PushGlobal(name));
                 ins.push(Instruction::Call);
             }
-            Expr::App { loc, head, args } => {
+            Expr::App { head, args, .. } => {
                 // Examine head
                 // If it is a constructor, use Ctor
                 // If it is a local variable, use call
