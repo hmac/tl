@@ -1,6 +1,5 @@
 pub mod ast;
 mod compiler;
-pub mod interpreter;
 mod local_variables;
 pub mod parser;
 mod stack;
@@ -150,7 +149,7 @@ impl<'a> Runner<'a> {
                 }
             },
             None => {
-                let error = interpreter::Error::UndefinedVariable(func_name.to_string());
+                let error = vm::Error::UndefinedVariable(func_name.to_string());
                 writeln!(&mut self.output, "Error:\n")?;
                 writeln!(&mut self.output, "{:?}", error)?;
                 Err(Error::Eval)

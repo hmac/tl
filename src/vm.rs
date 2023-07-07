@@ -465,7 +465,11 @@ fn match_pattern<'a>(target: &'a Value, pattern: &Pattern) -> Option<Vec<&'a Val
 }
 
 #[derive(Debug)]
-pub enum Error {}
+pub enum Error {
+    UndefinedVariable(String),
+    // TODO
+    NoMatchingBranch,
+}
 
 #[derive(Debug, Clone)]
 pub enum Value {
