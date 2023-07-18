@@ -680,7 +680,6 @@ impl Parser {
 
     fn parse_pattern(&mut self) -> Result<Pattern, Error> {
         // TODO: nested patterns in parens
-        // TODO: var patterns
         if self.input().starts_with(numeric_char) {
             let (loc, value) = self.parse_int()?;
             self.trim();
@@ -702,12 +701,48 @@ impl Parser {
             }
         }
 
+        if self.input().starts_with("[") {
+            let loc = self.loc;
+            self.eat("[")?;
+            let mut elems = vec![];
+            let mut tail = None;
+            loop {
+                self.trim();
+                if self.input().starts_with(".") || self.input().starts_with("]") {
+                    break;
+                }
+                elems.push(self.parse_pattern()?);
+                self.trim();
+                self.try_eat(",");
+            }
+            if self.input().starts_with(".") {
+                self.eat("..")?;
+                tail = Some(Box::new(self.parse_pattern()?));
+            }
+            self.trim();
+            self.eat("]")?;
+            if elems.is_empty() && tail.is_none() {
+                return Ok(Pattern::ListNil {
+                    loc: (loc, self.loc),
+                });
+            } else {
+                return Ok(Pattern::ListCons {
+                    loc: (loc, self.loc),
+                    elems,
+                    tail,
+                });
+            }
+        }
+
         let loc = self.loc;
         let name = self.parse_upper_ident()?;
         self.trim();
         let mut args = vec![];
         loop {
-            if self.input().starts_with("->") {
+            if self.input().starts_with("->")
+                || self.input().starts_with("]")
+                || self.input().starts_with(",")
+            {
                 break;
             }
             let pattern = self.parse_pattern_nested()?;

@@ -355,7 +355,8 @@ impl Vm {
                             ip = 0;
                         }
                         None => {
-                            todo!("No matching case branch");
+                            // TODO: flesh out this error
+                            return Err(Error::NoMatchingBranch);
                         }
                     }
                 }
@@ -461,6 +462,48 @@ fn match_pattern<'a>(target: &'a Value, pattern: &Pattern) -> Option<Vec<&'a Val
             _ => None,
         },
         Pattern::Wildcard { .. } => Some(vec![]),
+        Pattern::ListNil { .. } => {
+            if *target == Value::ListNil {
+                Some(vec![])
+            } else {
+                None
+            }
+        }
+        Pattern::ListCons { elems, tail, .. } => match target {
+            Value::ListCons(x, xs_) => {
+                if elems.is_empty() {
+                    None
+                } else {
+                    let mut xs: &Value = &xs_;
+                    // Match x with the first pattern in `elems`
+                    let p1 = &elems[0];
+                    let mut elem_matches = match_pattern(x, &p1)?;
+                    // Match each element in `xs` with the coresponding patterns in `elems`
+                    for p in elems.iter().skip(1) {
+                        match xs {
+                            Value::ListCons(y, ys) => {
+                                elem_matches.append(&mut match_pattern(&*y, &p)?);
+                                xs = &ys;
+                            }
+                            _ => {
+                                return None;
+                            }
+                        }
+                    }
+                    // Match the remaining `xs` with `tail`, if it exists.
+                    // Otherwise, match `xs` with ListNil
+                    if let Some(tail) = tail {
+                        elem_matches.append(&mut match_pattern(&*xs, &tail)?);
+                    } else {
+                        if *xs != Value::ListNil {
+                            return None;
+                        }
+                    }
+                    Some(elem_matches)
+                }
+            }
+            _ => None,
+        },
     }
 }
 

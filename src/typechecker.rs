@@ -811,6 +811,30 @@ impl Typechecker {
             Pattern::Int { loc, .. } => {
                 self.assert_type_eq(type_variables, expected_type, &TYPE_INT, *loc)?;
             }
+            Pattern::ListNil { loc, .. } => {
+                let var = self.make_fresh_var(type_variables);
+                let list_type = self.make_list_type(var);
+                self.assert_type_eq(type_variables, expected_type, &list_type, *loc)?;
+            }
+            Pattern::ListCons { loc, elems, tail } => {
+                // Check that the expected type is List a for some a
+                let var = self.make_fresh_var(type_variables);
+                let list_type = self.make_list_type(var.clone());
+                self.assert_type_eq(type_variables, expected_type, &list_type, *loc)?;
+
+                // Check that each pattern has type a
+                for e in elems {
+                    new_vars.extend(self.check_match_branch_pattern(type_variables, e, &var)?);
+                }
+                // Check that the tail, if present, has type List a
+                if let Some(tail) = tail {
+                    new_vars.extend(self.check_match_branch_pattern(
+                        type_variables,
+                        tail,
+                        &list_type,
+                    )?);
+                }
+            }
             Pattern::Wildcard { .. } => {}
             Pattern::Constructor {
                 name, args, loc, ..
@@ -889,10 +913,25 @@ impl Typechecker {
         branch: &CaseBranch,
     ) -> Result<Type, Error> {
         match &branch.pattern {
-            Pattern::Int { .. } | Pattern::Wildcard { .. } => {
+            Pattern::Int { loc, .. } => {
+                // The target type must be Int
+                self.assert_type_eq(type_variables, &target_type, &Type::Int, *loc)?;
+                self.infer_expr(local_variables, type_variables, &branch.rhs)
+            }
+            Pattern::Wildcard { .. } => {
                 self.infer_expr(local_variables, type_variables, &branch.rhs)
             }
             Pattern::Var { .. } => todo!(),
+            Pattern::ListNil { loc, .. } => {
+                // The target type must be List a for some a
+                let var = self.make_fresh_var(type_variables);
+                let list_type = self.make_list_type(var);
+                self.assert_type_eq(type_variables, &target_type, &list_type, *loc)?;
+                self.infer_expr(local_variables, type_variables, &branch.rhs)
+            }
+            Pattern::ListCons { .. } => {
+                todo!()
+            }
             Pattern::Constructor { name, args, .. } => {
                 // Lookup the type of the constructor and check it matches the target type.
                 let ctor_ty = match self.constructors.get(name) {
@@ -925,6 +964,8 @@ impl Typechecker {
                         }
                         Pattern::Int { .. } | Pattern::Wildcard { .. } => {}
                         Pattern::Constructor { .. } => todo!(),
+                        Pattern::ListNil { .. } => todo!(),
+                        Pattern::ListCons { .. } => todo!(),
                     }
                 }
                 let local_variables = local_variables.extend(new_vars);

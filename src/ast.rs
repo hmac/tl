@@ -452,6 +452,18 @@ pub enum Pattern {
     Wildcard {
         loc: Loc,
     },
+    ListNil {
+        loc: Loc,
+    },
+    // [x]
+    // [x, 1]
+    // [x, 1, [y]]
+    // [x, 1, [y], ..z]
+    ListCons {
+        loc: Loc,
+        elems: Vec<Pattern>,
+        tail: Option<Box<Pattern>>,
+    },
 }
 
 impl Pattern {
@@ -461,6 +473,14 @@ impl Pattern {
             Pattern::Var { name, .. } => [name].into(),
             Pattern::Int { .. } => HashSet::new(),
             Pattern::Wildcard { .. } => HashSet::new(),
+            Pattern::ListNil { .. } => HashSet::new(),
+            Pattern::ListCons { elems, tail, .. } => {
+                let mut vars: HashSet<&String> = elems.iter().flat_map(Self::vars).collect();
+                if let Some(tail) = tail {
+                    vars = vars.union(&tail.vars()).map(|x| *x).collect();
+                }
+                vars
+            }
         }
     }
 
@@ -479,6 +499,14 @@ impl Pattern {
             Pattern::Var { name, .. } => vec![name.to_string()],
             Pattern::Int { .. } => vec![],
             Pattern::Wildcard { .. } => vec![],
+            Pattern::ListNil { .. } => vec![],
+            Pattern::ListCons { elems, tail, .. } => {
+                let mut vars: Vec<String> = elems.iter().flat_map(Self::ordered_vars).collect();
+                if let Some(tail) = tail {
+                    vars.append(&mut tail.ordered_vars());
+                }
+                vars
+            }
         }
     }
 }
@@ -497,6 +525,23 @@ impl std::fmt::Display for Pattern {
             Pattern::Int { value, .. } => write!(f, "{}", value),
             Pattern::Var { name, .. } => write!(f, "{}", name),
             Pattern::Wildcard { .. } => write!(f, "_"),
+            Pattern::ListNil { .. } => write!(f, "[]"),
+            Pattern::ListCons { elems, tail, .. } => {
+                write!(f, "[")?;
+                let mut elems_iter = elems.iter();
+                if let Some(e) = elems_iter.next() {
+                    write!(f, "{}", e)?;
+                }
+                for e in elems_iter {
+                    write!(f, ", {}", e)?;
+                }
+                if let Some(tail) = tail {
+                    write!(f, "..{}]", tail)?;
+                } else {
+                    write!(f, "]")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -508,6 +553,8 @@ impl HasLoc for Pattern {
             Self::Int { loc, .. } => *loc,
             Self::Constructor { loc, .. } => *loc,
             Self::Wildcard { loc, .. } => *loc,
+            Self::ListNil { loc } => *loc,
+            Self::ListCons { loc, .. } => *loc,
         }
     }
 }
