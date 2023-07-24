@@ -313,7 +313,11 @@ impl Type {
 pub enum Expr {
     Var(Loc, Var),
     Int(Loc, i64),
-    List(Loc, Vec<Expr>),
+    List {
+        loc: Loc,
+        elems: Vec<Expr>,
+        tail: Option<Box<Expr>>,
+    },
     Case {
         loc: Loc,
         target: Box<Expr>,
@@ -342,7 +346,14 @@ impl Expr {
             Expr::Var(_, Var::Local(v)) => [v].into(),
             Expr::Var(_, _) => HashSet::new(),
             Expr::Int(_, _) => HashSet::new(),
-            Expr::List(_, elems) => elems.iter().flat_map(Self::free_variables).collect(),
+            Expr::List { elems, tail, .. } => {
+                let mut vars: HashSet<&String> =
+                    elems.iter().flat_map(Self::free_variables).collect();
+                if let Some(tail) = tail {
+                    vars = vars.union(&tail.free_variables()).map(|x| *x).collect();
+                }
+                vars
+            }
             Expr::Case { branches, .. } => {
                 let mut vars = HashSet::new();
                 for b in branches {
@@ -404,7 +415,7 @@ impl HasLoc for Expr {
         match self {
             Self::Var(loc, _) => *loc,
             Self::Int(loc, _) => *loc,
-            Self::List(loc, _) => *loc,
+            Self::List { loc, .. } => *loc,
             Self::Case { loc, .. } => *loc,
             Self::Func { loc, .. } => *loc,
             Self::App { loc, .. } => *loc,

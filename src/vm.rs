@@ -121,19 +121,25 @@ impl Vm {
                     ip += 1;
                 }
                 Instruction::PushCtor(c) => {
-                    let val = Value::Constructor {
-                        name: c.to_string(),
-                        args: vec![],
+                    let val = if c == "Nil" {
+                        Value::ListNil
+                    } else {
+                        Value::Constructor {
+                            name: c.to_string(),
+                            args: vec![],
+                        }
                     };
                     stack.push(val);
                     ip += 1;
                 }
+                // We expect that the top `len` elements on the stack are the list elements, and
+                // the `len + 1`th element is the final element, which is often Nil.
                 Instruction::MakeList(len) => {
-                    let mut list = Value::ListNil;
                     let mut elems = vec![];
                     for _ in 0..*len {
                         elems.push(stack.pop().expect("MakeList: empty stack"));
                     }
+                    let mut list = stack.pop().expect("MakeList: empty stack");
                     elems.reverse();
                     for e in elems {
                         list = Value::ListCons(Box::new(e), Box::new(list));
@@ -643,7 +649,7 @@ fn display_nonempty_list<'a>(
                 head = &*h;
                 tail = &*t;
             }
-            _ => unreachable!(),
+            t => unreachable!("{:?}", t),
         }
     }
     write!(f, "]")

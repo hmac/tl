@@ -4,7 +4,8 @@ foo : Bool -> Bool {
   b -> case b {
     // This constructor does not have the same type as the target
     Left -> True,
-    False -> False
+    False -> False,
+    True -> True,
   }
 }
 ---

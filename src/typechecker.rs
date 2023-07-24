@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ast::*;
 use crate::local_variables::LocalVariables;
@@ -48,6 +48,11 @@ pub enum Error {
         expected: Type,
         actual: Type,
     },
+    MissingCasePattern {
+        loc: Loc,
+        // Currently we can only report missing top-level patterns
+        constructor: String,
+    },
 }
 
 impl HasLoc for Error {
@@ -66,6 +71,7 @@ impl HasLoc for Error {
             Error::CannotApplyNonFunction { loc, .. } => *loc,
             Error::TooManyArgumentsInFunction { loc, .. } => *loc,
             Error::OccursCheck { loc, .. } => *loc,
+            Error::MissingCasePattern { loc, .. } => *loc,
         }
     }
 }
@@ -153,6 +159,13 @@ impl std::fmt::Display for Error {
                     "expected this to have the type {expected}, but it actually has the type {actual}. These types cannot be unified because one refers to the other."
                 )
             }
+            Error::MissingCasePattern { constructor, .. } => {
+                write!(
+                    f,
+                    "the constructor {} is not covered by this case expression",
+                    constructor
+                )
+            }
         }
     }
 }
@@ -184,7 +197,6 @@ impl Typechecker {
         let mut constructors = HashMap::new();
         // Insert the List type
         // TODO: when list cons syntax is added, remove these constructors
-        // TODO: add constructors - this needs access to `type_variables`.
         types.insert("List".to_string(), vec!["a".to_string()]);
         constructors.insert(
             "Nil".to_string(),
@@ -365,7 +377,7 @@ impl Typechecker {
                 let ty = self.infer_var(local_variables, type_variables, v, *loc)?;
                 self.assert_type_eq(type_variables, expected_type, &ty, *loc)
             }
-            Expr::List(loc, elems) => {
+            Expr::List { loc, elems, tail } => {
                 // Construct a fresh `List a` type, and unify it with the expected type.
                 let elem_type = self.make_fresh_var(type_variables);
                 let list_type = self.make_list_type(elem_type.clone());
@@ -373,6 +385,10 @@ impl Typechecker {
                 // Check that the list elements have type `a`
                 for elem in elems {
                     self.check_expr(local_variables, type_variables, elem, &elem_type)?;
+                }
+                // If present, check that the tail has type `List a`
+                if let Some(tail) = tail {
+                    self.check_expr(local_variables, type_variables, tail, &list_type)?;
                 }
                 Ok(())
             }
@@ -389,6 +405,13 @@ impl Typechecker {
                 if branches.is_empty() {
                     return Err(Error::EmptyMatch(*loc));
                 }
+
+                // check that the branches are exhaustive.
+                self.check_case_is_exhaustive(
+                    *loc,
+                    branches.iter().map(|b| &b.pattern),
+                    &target_type,
+                )?;
 
                 self.check_match_expr(
                     local_variables,
@@ -671,10 +694,17 @@ impl Typechecker {
         match expr {
             Expr::Int(_, _) => Ok(TYPE_INT),
             Expr::Var(loc, v) => self.infer_var(local_variables, type_variables, v, *loc),
-            Expr::List(_, elems) => {
+            Expr::List { elems, tail, .. } => {
                 // If the list is empty, generate a fresh type variable `a` and return `List a`.
                 match elems.split_first() {
-                    None => Ok(self.make_fresh_list_type(type_variables)),
+                    None => {
+                        let list_type = self.make_fresh_list_type(type_variables);
+                        // If present, check the tail
+                        if let Some(tail) = tail {
+                            self.check_expr(local_variables, type_variables, tail, &list_type)?;
+                        }
+                        Ok(list_type)
+                    }
                     Some((first, rest)) => {
                         // Infer the first element
                         // Check that the remaining elements have the same type
@@ -682,7 +712,12 @@ impl Typechecker {
                         for elem in rest {
                             self.check_expr(local_variables, type_variables, elem, &ty)?;
                         }
-                        Ok(self.make_list_type(ty))
+                        // If it exists, check that the tail has the type `List a`
+                        let list_type = self.make_list_type(ty);
+                        if let Some(tail) = tail {
+                            self.check_expr(local_variables, type_variables, tail, &list_type)?;
+                        }
+                        Ok(list_type)
                     }
                 }
             }
@@ -699,6 +734,13 @@ impl Typechecker {
                 if branches.is_empty() {
                     return Err(Error::EmptyMatch(*loc));
                 }
+
+                // check that the branches are exhaustive.
+                self.check_case_is_exhaustive(
+                    *loc,
+                    branches.iter().map(|b| &b.pattern),
+                    &target_type,
+                )?;
 
                 // Infer the return type of the first branch
                 let result_type = self.infer_match_branch(
@@ -869,6 +911,116 @@ impl Typechecker {
             }
         }
         Ok(new_vars)
+    }
+
+    fn check_case_is_exhaustive<'a, I: Iterator<Item = &'a Pattern>>(
+        &self,
+        loc: Loc,
+        branch_patterns: I,
+        target_type: &Type,
+    ) -> Result<(), Error> {
+        // Eventually we want to do this properly, perhaps following the
+        // Lower Your Guards approach (https://dl.acm.org/doi/pdf/10.1145/3408989).
+        //
+        // For now we just check that the top-most patterns are exhaustive.
+
+        match target_type {
+            Type::Int => {
+                // we don't yet handle exhaustiveness checking for int patterns
+                Ok(())
+            }
+            Type::Bool => {
+                let mut true_covered = false;
+                let mut false_covered = false;
+                for p in branch_patterns {
+                    match p {
+                        Pattern::Wildcard { .. } | Pattern::Var { .. } => return Ok(()),
+                        Pattern::Constructor { name, .. } if name == "True" => {
+                            true_covered = true;
+                        }
+                        Pattern::Constructor { name, .. } if name == "False" => {
+                            false_covered = true;
+                        }
+                        _ => {}
+                    }
+                }
+                if !true_covered {
+                    return Err(Error::MissingCasePattern {
+                        loc,
+                        constructor: "True".to_string(),
+                    });
+                }
+                if !false_covered {
+                    return Err(Error::MissingCasePattern {
+                        loc,
+                        constructor: "False".to_string(),
+                    });
+                }
+                Ok(())
+            }
+            _ => {
+                let type_name = {
+                    let n;
+                    let mut t = target_type;
+                    loop {
+                        match t {
+                            Type::Named(name) => {
+                                n = Some(name);
+                                break;
+                            }
+                            Type::App { head, .. } => {
+                                t = head;
+                            }
+                            Type::Var(_) => {
+                                // If the type is a variable, we can't know what patterns are
+                                // valid.
+                                // If we're reached this case it's because we haven't yet solved
+                                // the required constraints to know what the actual type is.
+                                return Ok(());
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    n.unwrap()
+                };
+                // We don't handle lists yet
+                if type_name == "List" {
+                    return Ok(());
+                }
+                let mut all_constructors: HashSet<&str> = self
+                    .constructors
+                    .iter()
+                    .filter(|(_, (t, _, _))| t == type_name)
+                    .map(|(n, _)| n.as_str())
+                    .collect();
+
+                for p in branch_patterns {
+                    match p {
+                        Pattern::Var { .. } | Pattern::Wildcard { .. } => {
+                            return Ok(());
+                        }
+                        Pattern::Constructor { name, .. } => {
+                            all_constructors.remove(name.as_str());
+                        }
+                        Pattern::ListNil { .. } => {
+                            all_constructors.remove("Nil");
+                        }
+                        Pattern::ListCons { .. } => {
+                            all_constructors.remove("Cons");
+                        }
+                        Pattern::Int { .. } => unreachable!(),
+                    }
+                }
+
+                if all_constructors.is_empty() {
+                    return Ok(());
+                }
+                Err(Error::MissingCasePattern {
+                    loc,
+                    constructor: all_constructors.into_iter().next().unwrap().to_string(),
+                })
+            }
+        }
     }
 
     fn infer_var(

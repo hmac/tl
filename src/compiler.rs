@@ -96,8 +96,15 @@ impl Compiler {
             Expr::Int(_, i) => {
                 ins.push(Instruction::PushInt(*i));
             }
-            Expr::List(_, elems) => {
+            Expr::List { elems, tail, .. } => {
                 assert!(elems.len() <= (u8::MAX as usize));
+                // Compile the tail expression, if present
+                // Otherwise push Nil
+                if let Some(tail) = tail {
+                    ins.append(&mut self.compile_expr(func_name, tail, locals.clone(), false)?);
+                } else {
+                    ins.push(Instruction::PushCtor("Nil".to_string()));
+                }
                 for e in elems.iter().rev() {
                     ins.append(&mut self.compile_expr(func_name, e, locals.clone(), false)?);
                 }
