@@ -195,40 +195,7 @@ impl Typechecker {
     pub fn new() -> Self {
         let mut types = HashMap::new();
         let mut constructors = HashMap::new();
-        // Insert the List type
-        // TODO: when list cons syntax is added, remove these constructors
         types.insert("List".to_string(), vec!["a".to_string()]);
-        constructors.insert(
-            "Nil".to_string(),
-            (
-                "List".to_string(),
-                (0, 0),
-                Type::App {
-                    head: Box::new(Type::Named("List".to_string())),
-                    args: vec![Type::Var("a".to_string())],
-                },
-            ),
-        );
-        constructors.insert(
-            "Cons".to_string(),
-            (
-                "List".to_string(),
-                (0, 0),
-                Type::Func(
-                    Box::new(Type::Var("a".to_string())),
-                    Box::new(Type::Func(
-                        Box::new(Type::App {
-                            head: Box::new(Type::Named("List".to_string())),
-                            args: vec![Type::Var("a".to_string())],
-                        }),
-                        Box::new(Type::App {
-                            head: Box::new(Type::Named("List".to_string())),
-                            args: vec![Type::Var("a".to_string())],
-                        }),
-                    )),
-                ),
-            ),
-        );
 
         constructors.insert(
             "False".to_string(),

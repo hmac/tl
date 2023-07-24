@@ -7,8 +7,8 @@ not : Bool -> Bool {
 
 empty : List a -> Bool {
   list -> case list {
-    Nil -> True,
-    Cons x xs -> False
+    [] -> True,
+    [x, ..xs] -> False
   }
 }
 
@@ -16,6 +16,6 @@ not_empty : List a -> Bool {
   list -> not (empty list)
 }
 
-main : Bool { empty Nil }
+main : Bool { empty [] }
 ---
 True

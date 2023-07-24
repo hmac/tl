@@ -1,21 +1,21 @@
 length : List a -> Int {
   l -> case l {
-    Nil -> 0,
-    Cons _ l -> + 1 (length l)
+    [] -> 0,
+    [_, ..l] -> + 1 (length l)
   }
 }
 
 map : (a -> b) -> List a -> List b {
   f l -> case l {
-    Nil -> Nil,
-    Cons x xs -> Cons (f x) (map f xs)
+    [] -> [],
+    [x, ..xs] -> [f x, ..map f xs]
   }
 }
 
 fold : (a -> b -> b) -> b -> List a -> b {
   f z l -> case l {
-    Nil -> z,
-    Cons x xs -> f x (fold f z xs)
+    [] -> z,
+    [x, ..xs] -> f x (fold f z xs)
   }
 }
 
@@ -27,10 +27,10 @@ length2 : List a -> Int {
 
 zip : List a -> List b -> List (Pair a b) {
   l r -> case l {
-    Nil -> Nil,
-    Cons lx lxx -> case r {
-      Nil -> Nil,
-      Cons rx rxx -> [Pair lx rx, ..zip lxx rxx]
+    [] -> [],
+    [lx, ..lxx] -> case r {
+      [] -> [],
+      [rx, ..rxx] -> [Pair lx rx, ..zip lxx rxx]
     }
   }
 }
@@ -72,8 +72,8 @@ type Maybe a { None, Some a }
 
 head : List a -> Maybe a {
   l -> case l {
-    Nil -> None,
-    Cons x _ -> Some x
+    [] -> None,
+    [x, .._] -> Some x
   }
 }
 

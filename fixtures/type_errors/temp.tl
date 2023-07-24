@@ -2,15 +2,15 @@ type List2 a { Nil2, Cons2 a (List2 a) }
 
 convert : List a -> List2 a {
   l -> case l {
-    Nil -> Nil2,
-    Cons x xs -> Cons2 x (convert xs)
+    [] -> Nil2,
+    [x, ..xs] -> Cons2 x (convert xs)
   }
 }
 
 length : List a -> Int {
   l -> case l {
-    Nil -> 0,
-    Cons _ xs -> + 1 (length xs)
+    [] -> 0,
+    [_, ..xs] -> + 1 (length xs)
   }
 }
 
