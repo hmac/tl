@@ -176,8 +176,18 @@ impl<'a> Runner<'a> {
                                 writeln!(&mut self.output, "{name}: FAIL\n")?;
                                 failures += 1;
                             }
+                            // TODO: remove by adding bools to the AST
+                            vm::Value::Constructor { name, args } if name == "True" => {
+                                assert!(args.is_empty());
+                                writeln!(&mut self.output, "{name}: PASS\n")?;
+                            }
+                            vm::Value::Constructor { name, args } if name == "False" => {
+                                assert!(args.is_empty());
+                                writeln!(&mut self.output, "{name}: FAIL\n")?;
+                                failures += 1;
+                            }
                             _ => {
-                                panic!("Unexpected result from test {name}: {result}");
+                                panic!("Unexpected result from test {name}: {result:?}");
                             }
                         },
                         Err(error) => {

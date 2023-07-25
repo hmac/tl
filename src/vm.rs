@@ -79,6 +79,16 @@ impl Vm {
                         panic!("mul_int: bad args");
                     }
                 },
+                Instruction::LtInt => match (stack.pop().unwrap(), stack.pop().unwrap()) {
+                    (Value::Int(x), Value::Int(y)) => {
+                        stack.push(Value::Bool(x < y));
+                        ip += 1;
+                    }
+                    (x, y) => {
+                        error!(?x, ?y, "lt_int: bad args");
+                        panic!("lt_int: bad args");
+                    }
+                },
                 Instruction::Eq => {
                     let x = stack.pop().unwrap();
                     let y = stack.pop().unwrap();
@@ -546,7 +556,7 @@ pub enum Value {
 impl PartialEq for Value {
     /// Panics if you try to compare two values of different types, e.g. Bool and Int
     /// This is to surface typechecking bugs.
-    /// Returns false if you try to compare functions.
+    /// Returns false if you try to compare functions (should it panic?)
     fn eq(&self, other: &Value) -> bool {
         match self {
             Self::Func { .. } => false,
@@ -616,7 +626,8 @@ impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             Value::Int(n) => write!(f, "{}", n),
-            Value::Bool(b) => write!(f, "{}", b),
+            Value::Bool(true) => write!(f, "True"),
+            Value::Bool(false) => write!(f, "False"),
             Value::Func { block_id, name, .. } => write!(f, "<func({}: {name})>", block_id.0),
             Value::Operator { .. } => write!(f, "<func(op)>"),
             Value::Constructor { name, args } => {

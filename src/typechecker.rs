@@ -945,7 +945,12 @@ impl Typechecker {
                                 // the required constraints to know what the actual type is.
                                 return Ok(());
                             }
-                            _ => unreachable!(),
+                            Type::Func(_, _) => {
+                                // We can't pattern match functions, so don't bother with
+                                // exhaustiveness checking.
+                                return Ok(());
+                            }
+                            _ => unreachable!("{:?}", t),
                         }
                     }
                     n.unwrap()
@@ -1004,6 +1009,10 @@ impl Typechecker {
                 Operator::Add | Operator::Sub | Operator::Mul => Ok(Type::Func(
                     Box::new(Type::Int),
                     Box::new(Type::Func(Box::new(Type::Int), Box::new(Type::Int))),
+                )),
+                Operator::Lt => Ok(Type::Func(
+                    Box::new(Type::Int),
+                    Box::new(Type::Func(Box::new(Type::Int), Box::new(Type::Bool))),
                 )),
                 Operator::Eq => {
                     // eq : a -> a -> Bool

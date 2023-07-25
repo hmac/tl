@@ -496,7 +496,9 @@ impl Parser {
         {
             let loc = self.loc;
             let var = self.parse_var_or_constructor()?;
-            return Ok(Expr::Var((loc, self.loc), var));
+            let loc_end = self.loc;
+            self.trim();
+            return Ok(Expr::Var((loc, loc_end), var));
         }
         if self.input().starts_with(operator_char) {
             // To ensure we don't parse x -> y as x - <parse error>
@@ -779,7 +781,9 @@ impl Parser {
         match s.parse() {
             Ok(n) => {
                 self.loc += len;
-                Ok(((loc, self.loc), n))
+                let loc_end = self.loc;
+                self.trim();
+                Ok(((loc, loc_end), n))
             }
             Err(_) => Err(Error::ExpectedInteger((loc, self.loc))),
         }
@@ -795,6 +799,7 @@ impl Parser {
                 '=' => Operator::Eq,
                 _ => return Err(Error::ExpectedOperator((self.loc - 2, self.loc - 1))),
             },
+            '<' => Operator::Lt,
             _ => {
                 return Err(Error::ExpectedOperator((self.loc - 1, self.loc - 1)));
             }
@@ -889,7 +894,7 @@ fn numeric_char(c: char) -> bool {
 }
 
 fn operator_char(c: char) -> bool {
-    c == '+' || c == '-' || c == '*' || c == '='
+    c == '+' || c == '-' || c == '*' || c == '=' || c == '<'
 }
 
 #[derive(Debug)]

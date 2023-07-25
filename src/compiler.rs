@@ -90,6 +90,7 @@ impl Compiler {
                     Operator::Add => Instruction::PushGlobal("+".to_string()),
                     Operator::Sub => Instruction::PushGlobal("-".to_string()),
                     Operator::Mul => Instruction::PushGlobal("*".to_string()),
+                    Operator::Lt => Instruction::PushGlobal("<".to_string()),
                     Operator::Eq => Instruction::PushGlobal("==".to_string()),
                 });
             }
@@ -201,6 +202,7 @@ impl Compiler {
                             Operator::Add => Instruction::AddInt,
                             Operator::Sub => Instruction::SubInt,
                             Operator::Mul => Instruction::MulInt,
+                            Operator::Lt => Instruction::LtInt,
                             Operator::Eq => Instruction::Eq,
                         });
                     }
@@ -317,6 +319,22 @@ impl Compiler {
         )
         .unwrap();
         self.compile_func(
+            "<",
+            &Expr::Func {
+                loc: (0, 0),
+                args: vec![((0, 0), "x".to_string()), ((0, 0), "y".to_string())],
+                body: Box::new(Expr::App {
+                    loc: (0, 0),
+                    head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Lt))),
+                    args: vec![
+                        Expr::Var((0, 0), Var::Local("x".to_string())),
+                        Expr::Var((0, 0), Var::Local("y".to_string())),
+                    ],
+                }),
+            },
+        )
+        .unwrap();
+        self.compile_func(
             "==",
             &Expr::Func {
                 loc: (0, 0),
@@ -343,6 +361,7 @@ pub enum Instruction {
     AddInt,
     SubInt,
     MulInt,
+    LtInt,
     Eq,
     PushInt(i64),
     // Push a local variable on to the stack.

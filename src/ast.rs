@@ -585,6 +585,7 @@ pub enum Operator {
     Sub,
     Mul,
     Eq,
+    Lt,
 }
 
 impl Type {
