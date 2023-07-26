@@ -167,3 +167,22 @@ size : BinaryTree a -> Int {
 test size_1 { == 6 (size (from_ordered_list [1,2,3,4,5,6])) }
 test size_2 { == 0 (size make_tree)  }
 test size_3 { == 3 (size (from_list cmp_int [1,2,2,2,2,6])) }
+
+depth : BinaryTree a -> Int {
+  t -> case t {
+    Leaf -> 0,
+    Branch l x r -> + 1 (max2 (depth l) (depth r))
+  }
+}
+
+max2 : Int -> Int -> Int {
+  x y -> case < x y {
+    True -> y,
+    False -> x
+  }
+}
+
+test depth_0 { == 0 (depth make_tree) }
+test depth_1 { == 1 (depth (from_ordered_list [1])) }
+test depth_2 { == 2 (depth (from_ordered_list [1, 2])) }
+test depth_3 { == 2 (depth (from_list cmp_int [3, 1, 2])) }
