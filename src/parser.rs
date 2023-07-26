@@ -725,6 +725,7 @@ impl Parser {
             if self.input().starts_with("->")
                 || self.input().starts_with("]")
                 || self.input().starts_with(",")
+                || self.input().starts_with(")")
             {
                 break;
             }
@@ -739,6 +740,9 @@ impl Parser {
         })
     }
 
+    // Like `parse_pattern` but does not parse constructor patterns with arguments.
+    // In other words, it only parses patterns that are unambiguous when used
+    // inside a larger pattern.
     fn parse_pattern_nested(&mut self) -> Result<Pattern, Error> {
         if self.input().starts_with(numeric_char) {
             let (loc, value) = self.parse_int()?;
@@ -758,6 +762,14 @@ impl Parser {
                     name,
                 });
             }
+        }
+        if self.input().starts_with("(") {
+            self.eat("(")?;
+            self.trim();
+            let pat = self.parse_pattern()?;
+            self.eat(")")?;
+            self.trim();
+            return Ok(pat);
         }
 
         let loc = self.loc;
