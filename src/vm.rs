@@ -633,13 +633,24 @@ impl std::fmt::Display for Value {
             Value::Constructor { name, args } => {
                 write!(f, "{}", name)?;
                 for arg in args {
-                    write!(f, " {}", arg)?;
+                    write!(f, " ")?;
+                    display_constructor_arg(f, arg)?;
                 }
                 Ok(())
             }
             Value::ListCons(head, tail) => display_nonempty_list(f, &head, &tail),
             Value::ListNil => write!(f, "[]"),
         }
+    }
+}
+
+fn display_constructor_arg(
+    f: &mut std::fmt::Formatter<'_>,
+    arg: &Value,
+) -> Result<(), std::fmt::Error> {
+    match arg {
+        Value::Constructor { args, .. } if args.len() > 0 => write!(f, "({})", arg),
+        _ => write!(f, "{}", arg),
     }
 }
 
