@@ -16,6 +16,7 @@ pub enum Error {
     ExpectedInteger(Loc),
     UnexpectedEof(Loc),
     ExpectedType(Loc),
+    UnknownStringEscapeSequence(Loc),
 }
 
 impl HasLoc for Error {
@@ -31,6 +32,7 @@ impl HasLoc for Error {
             Error::ExpectedInteger(loc) => *loc,
             Error::UnexpectedEof(loc) => *loc,
             Error::ExpectedType(loc) => *loc,
+            Error::UnknownStringEscapeSequence(loc) => *loc,
         }
     }
 }
@@ -67,6 +69,9 @@ impl std::fmt::Display for Error {
             }
             Error::ExpectedType(_) => {
                 write!(f, "expected a type")
+            }
+            Error::UnknownStringEscapeSequence(_) => {
+                write!(f, "unknown string escape sequence")
             }
         }
     }
@@ -278,6 +283,7 @@ impl Parser {
                 Ok(match type_name.as_str() {
                     "Int" => SourceType::Int((loc, self.loc)),
                     "Bool" => SourceType::Bool((loc, self.loc)),
+                    "String" => SourceType::Str((loc, self.loc)),
                     _ => SourceType::Named((loc, self.loc), type_name),
                 })
             } else {
@@ -392,6 +398,9 @@ impl Parser {
         }
         if self.input().starts_with("[") {
             return self.parse_list();
+        }
+        if self.input().starts_with("\"") {
+            return self.parse_string();
         }
 
         // Otherwise, it's a function application or a function
@@ -662,7 +671,6 @@ impl Parser {
     }
 
     fn parse_pattern(&mut self) -> Result<Pattern, Error> {
-        // TODO: nested patterns in parens
         if self.input().starts_with(numeric_char) {
             let (loc, value) = self.parse_int()?;
             self.trim();
@@ -842,6 +850,32 @@ impl Parser {
             variables: vec![],
             arguments,
         })
+    }
+
+    fn parse_string(&mut self) -> Result<Expr, Error> {
+        let loc = self.loc;
+        self.eat("\"")?;
+        let mut s = String::new();
+        loop {
+            let c = self.eat_char()?;
+            if c == '\\' {
+                let c2 = self.eat_char()?;
+                if c2 == '"' {
+                    s.push('"');
+                } else if c2 == '\\' {
+                    s.push('\\');
+                } else {
+                    return Err(Error::UnknownStringEscapeSequence((self.loc - 2, self.loc)));
+                }
+            } else if c == '"' {
+                break;
+            } else {
+                s.push(c);
+            }
+        }
+        let r = Expr::Str((loc, self.loc), s);
+        self.trim();
+        Ok(r)
     }
 
     /// Parse an uppercase identifier.

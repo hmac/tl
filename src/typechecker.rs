@@ -6,6 +6,7 @@ use crate::local_variables::LocalVariables;
 use tracing::debug;
 
 const TYPE_INT: Type = Type::Int;
+const TYPE_STRING: Type = Type::Str;
 
 #[derive(Debug)]
 pub enum Error {
@@ -340,6 +341,9 @@ impl Typechecker {
             Expr::Int(loc, _) => {
                 self.assert_type_eq(type_variables, expected_type, &TYPE_INT, *loc)
             }
+            Expr::Str(loc, _) => {
+                self.assert_type_eq(type_variables, expected_type, &TYPE_STRING, *loc)
+            }
             Expr::Var(loc, v) => {
                 let ty = self.infer_var(local_variables, type_variables, v, *loc)?;
                 self.assert_type_eq(type_variables, expected_type, &ty, *loc)
@@ -660,6 +664,7 @@ impl Typechecker {
     ) -> Result<Type, Error> {
         match expr {
             Expr::Int(_, _) => Ok(TYPE_INT),
+            Expr::Str(_, _) => Ok(TYPE_STRING),
             Expr::Var(loc, v) => self.infer_var(local_variables, type_variables, v, *loc),
             Expr::List { elems, tail, .. } => {
                 // If the list is empty, generate a fresh type variable `a` and return `List a`.
@@ -1170,13 +1175,16 @@ impl Typechecker {
                 self.try_solve_type_var(type_variables, actual_var, expected, loc, true)?;
                 Ok(())
             }
-            (Type::Int, _) | (_, Type::Int) | (Type::Bool, _) | (_, Type::Bool) => {
-                Err(Error::ExpectedType {
-                    loc,
-                    expected: expected.clone(),
-                    actual: actual.clone(),
-                })
-            }
+            (Type::Int, _)
+            | (_, Type::Int)
+            | (Type::Bool, _)
+            | (_, Type::Bool)
+            | (Type::Str, _)
+            | (_, Type::Str) => Err(Error::ExpectedType {
+                loc,
+                expected: expected.clone(),
+                actual: actual.clone(),
+            }),
             (Type::Named(_), _) => Err(Error::ExpectedType {
                 loc,
                 expected: expected.clone(),
@@ -1420,7 +1428,7 @@ impl Typechecker {
                 self.check_type(f, loc, vars_in_scope)?;
                 self.check_type(x, loc, vars_in_scope)?;
             }
-            Type::Int | Type::Bool => {}
+            Type::Int | Type::Bool | Type::Str => {}
             Type::App { head, args } => {
                 self.check_type(head, loc, vars_in_scope)?;
                 for arg in args {

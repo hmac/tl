@@ -97,6 +97,9 @@ impl Compiler {
             Expr::Int(_, i) => {
                 ins.push(Instruction::PushInt(*i));
             }
+            Expr::Str(_, s) => {
+                ins.push(Instruction::PushStr(s.to_string()));
+            }
             Expr::List { elems, tail, .. } => {
                 assert!(elems.len() <= (u8::MAX as usize));
                 // Compile the tail expression, if present
@@ -364,6 +367,7 @@ pub enum Instruction {
     LtInt,
     Eq,
     PushInt(i64),
+    PushStr(String),
     // Push a local variable on to the stack.
     // The argument is an offset from the stack frame index indicating the location of the variable
     // on the stack.
