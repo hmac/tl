@@ -117,6 +117,13 @@ impl Compiler {
                 }
                 ins.push(Instruction::MakeList(elems.len() as u8));
             }
+            Expr::Tuple { elems, .. } => {
+                assert!(elems.len() <= (u8::MAX as usize));
+                for e in elems.iter().rev() {
+                    ins.append(&mut self.compile_expr(func_name, e, locals.clone(), false)?);
+                }
+                ins.push(Instruction::MakeTuple(elems.len() as u8));
+            }
             Expr::Case {
                 target, branches, ..
             } => {
@@ -384,6 +391,7 @@ pub enum Instruction {
     PushGlobal(String),
     PushCtor(String),
     MakeList(u8),
+    MakeTuple(u8),
     Ctor(String, u8),
     // At the time of execution of Call, the topmost stack element must the function to call,
     // and the next element must be the number of args being provided to the call.

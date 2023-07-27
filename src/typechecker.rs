@@ -55,6 +55,15 @@ pub enum Error {
         // Currently we can only report missing top-level patterns
         constructor: String,
     },
+    TupleUnexpectedNumberOfElements {
+        loc: Loc,
+        expected_number: usize,
+        actual_number: usize,
+    },
+    ExpectedTupleType {
+        loc: Loc,
+        actual_type: Type,
+    },
 }
 
 impl HasLoc for Error {
@@ -74,6 +83,8 @@ impl HasLoc for Error {
             Error::TooManyArgumentsInFunction { loc, .. } => *loc,
             Error::OccursCheck { loc, .. } => *loc,
             Error::MissingCasePattern { loc, .. } => *loc,
+            Error::TupleUnexpectedNumberOfElements { loc, .. } => *loc,
+            Error::ExpectedTupleType { loc, .. } => *loc,
         }
     }
 }
@@ -99,7 +110,7 @@ impl std::fmt::Display for Error {
             Error::ExpectedType {
                 expected, actual, ..
             } => {
-                write!(f, "expected this to have the type {expected}, but it actually has the type {actual}")
+                write!(f, "expected this to have the type {expected} but it actually has the type {actual}")
             }
             Error::CaseBranchArgNumberMismatch {
                 number_of_args_in_branch,
@@ -158,14 +169,29 @@ impl std::fmt::Display for Error {
             } => {
                 write!(
                     f,
-                    "expected this to have the type {expected}, but it actually has the type {actual}. These types cannot be unified because one refers to the other."
+                    "expected this to have the type {expected} but it actually has the type {actual}. These types cannot be unified because one refers to the other."
                 )
             }
             Error::MissingCasePattern { constructor, .. } => {
                 write!(
                     f,
-                    "the constructor {} is not covered by this case expression",
-                    constructor
+                    "the constructor {constructor} is not covered by this case expression"
+                )
+            }
+            Error::TupleUnexpectedNumberOfElements {
+                expected_number,
+                actual_number,
+                ..
+            } => {
+                write!(
+                    f,
+                    "expected a tuple with {expected_number} elements, but found a tuple with {actual_number} elements"
+                )
+            }
+            Error::ExpectedTupleType { actual_type, .. } => {
+                write!(
+                    f,
+                    "expected this to have a tuple type, but its actual type is {actual_type}"
                 )
             }
         }
@@ -352,6 +378,36 @@ impl Typechecker {
                 let ty = self.infer_var(local_variables, type_variables, v, *loc)?;
                 self.assert_type_eq(type_variables, expected_type, &ty, *loc)
             }
+            Expr::Tuple { loc, elems } => match expected_type {
+                Type::Tuple(expected_elem_types) => {
+                    if elems.len() != expected_elem_types.len() {
+                        return Err(Error::TupleUnexpectedNumberOfElements {
+                            loc: *loc,
+                            expected_number: expected_elem_types.len(),
+                            actual_number: elems.len(),
+                        });
+                    }
+                    for (e, t) in elems.iter().zip(expected_elem_types.iter()) {
+                        self.check_expr(local_variables, type_variables, e, t)?;
+                    }
+                    Ok(())
+                }
+                _ => {
+                    // For the tuple to typecheck, this type must unify to some tuple type
+                    // (a, b, c, ...) with the number of element types matching the number of
+                    // elements in the tuple.
+                    // So we construct a new tuple type (t1, t2, t3, ...) with fresh type variables
+                    // and unify it with the expected type.
+                    let mut new_vars = vec![];
+                    for e in elems {
+                        let var = self.make_fresh_var(type_variables);
+                        self.check_expr(local_variables, type_variables, e, &var)?;
+                        new_vars.push(var);
+                    }
+                    let ty = Type::Tuple(new_vars);
+                    self.assert_type_eq(type_variables, expected_type, &ty, *loc)
+                }
+            },
             Expr::List { loc, elems, tail } => {
                 // Construct a fresh `List a` type, and unify it with the expected type.
                 let elem_type = self.make_fresh_var(type_variables);
@@ -671,6 +727,13 @@ impl Typechecker {
             Expr::Str(_, _) => Ok(TYPE_STRING),
             Expr::Char(_, _) => Ok(TYPE_STRING),
             Expr::Var(loc, v) => self.infer_var(local_variables, type_variables, v, *loc),
+            Expr::Tuple { elems, .. } => {
+                let mut elem_types = vec![];
+                for e in elems {
+                    elem_types.push(self.infer_expr(local_variables, type_variables, e)?);
+                }
+                Ok(Type::Tuple(elem_types))
+            }
             Expr::List { elems, tail, .. } => {
                 // If the list is empty, generate a fresh type variable `a` and return `List a`.
                 match elems.split_first() {
@@ -1180,6 +1243,19 @@ impl Typechecker {
                 self.try_solve_type_var(type_variables, actual_var, expected, loc, true)?;
                 Ok(())
             }
+            (Type::Tuple(elems_expected), Type::Tuple(elems_actual)) => {
+                if elems_expected.len() != elems_actual.len() {
+                    return Err(Error::TupleUnexpectedNumberOfElements {
+                        loc,
+                        expected_number: elems_expected.len(),
+                        actual_number: elems_actual.len(),
+                    });
+                }
+                for (exp, act) in elems_expected.iter().zip(elems_actual.iter()) {
+                    self.assert_type_eq(type_variables, exp, act, loc)?;
+                }
+                Ok(())
+            }
             (Type::Int, _)
             | (_, Type::Int)
             | (Type::Bool, _)
@@ -1187,7 +1263,9 @@ impl Typechecker {
             | (Type::Char, _)
             | (_, Type::Char)
             | (Type::Str, _)
-            | (_, Type::Str) => Err(Error::ExpectedType {
+            | (_, Type::Str)
+            | (_, Type::Tuple(_))
+            | (Type::Tuple(_), _) => Err(Error::ExpectedType {
                 loc,
                 expected: expected.clone(),
                 actual: actual.clone(),
@@ -1436,6 +1514,11 @@ impl Typechecker {
                 self.check_type(x, loc, vars_in_scope)?;
             }
             Type::Int | Type::Bool | Type::Str | Type::Char => {}
+            Type::Tuple(elems) => {
+                for e in elems {
+                    self.check_type(e, loc, vars_in_scope)?;
+                }
+            }
             Type::App { head, args } => {
                 self.check_type(head, loc, vars_in_scope)?;
                 for arg in args {

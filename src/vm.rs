@@ -167,6 +167,15 @@ impl Vm {
                     stack.push(list);
                     ip += 1;
                 }
+                Instruction::MakeTuple(len) => {
+                    let mut elems = vec![];
+                    for _ in 0..*len {
+                        elems.push(stack.pop().expect("MakeTuple: empty stack"));
+                    }
+                    elems.reverse();
+                    stack.push(Value::Tuple(elems));
+                    ip += 1;
+                }
                 Instruction::Ctor(c, len) => {
                     let mut args = stack.split_off(stack.len() - *len as usize);
                     args.reverse();
@@ -546,6 +555,7 @@ pub enum Value {
     Str(String),
     Char(char),
     Bool(bool),
+    Tuple(Vec<Value>),
     ListCons(Box<Value>, Box<Value>),
     ListNil,
     Func {
@@ -586,6 +596,10 @@ impl PartialEq for Value {
             },
             Self::Bool(n) => match other {
                 Self::Bool(m) => n == m,
+                _ => unreachable!("self: {self:?} other: {other:?}"),
+            },
+            Self::Tuple(elems1) => match other {
+                Self::Tuple(elems2) => elems1 == elems2,
                 _ => unreachable!("self: {self:?} other: {other:?}"),
             },
             Self::Operator {
@@ -662,6 +676,22 @@ impl std::fmt::Display for Value {
             }
             Value::ListCons(head, tail) => display_nonempty_list(f, &head, &tail),
             Value::ListNil => write!(f, "[]"),
+            Value::Tuple(elems) => {
+                if elems.is_empty() {
+                    write!(f, "(,)")
+                } else {
+                    write!(f, "({},", elems[0])?;
+                    let n = elems.len();
+                    for (i, e) in elems.iter().enumerate() {
+                        if i == n - 1 {
+                            write!(f, " {})", e)?;
+                        } else {
+                            write!(f, " {}, ", e)?;
+                        }
+                    }
+                    write!(f, ")")
+                }
+            }
         }
     }
 }

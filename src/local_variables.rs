@@ -30,15 +30,4 @@ impl<'a, T> LocalVariables<'a, T> {
     pub fn extend(&'a self, stack: HashMap<String, T>) -> LocalVariables<'a, T> {
         Self::More(stack, &self)
     }
-
-    pub fn names(&'a self) -> Vec<&String> {
-        match self {
-            Self::One(s) => s.keys().collect(),
-            Self::More(s, r) => {
-                let mut names = r.names();
-                names.append(&mut s.keys().collect());
-                names
-            }
-        }
-    }
 }

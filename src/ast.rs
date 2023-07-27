@@ -180,6 +180,10 @@ pub enum SourceType {
     Bool(Loc),
     Str(Loc),
     Char(Loc),
+    Tuple {
+        loc: Loc,
+        elems: Vec<SourceType>,
+    },
     App {
         loc: Loc,
         head: Box<SourceType>,
@@ -199,6 +203,7 @@ impl HasLoc for SourceType {
             Self::Char(loc) => *loc,
             Self::App { loc, .. } => *loc,
             Self::Var(loc, _) => *loc,
+            Self::Tuple { loc, .. } => *loc,
         }
     }
 }
@@ -212,6 +217,7 @@ pub enum Type {
     Str,
     Char,
     Bool,
+    Tuple(Vec<Type>),
     App { head: Box<Type>, args: Vec<Type> },
     Var(String),
 }
@@ -238,6 +244,7 @@ impl Type {
                 }
                 vars
             }
+            Type::Tuple(elems) => elems.iter().flat_map(Self::vars).collect(),
             Type::Var(v) => vec![v.to_string()],
         }
     }
@@ -277,6 +284,23 @@ impl Type {
             Type::Str => write!(f, "String"),
             Type::Bool => write!(f, "Bool"),
             Type::Char => write!(f, "Char"),
+            Type::Tuple(elems) => {
+                if elems.is_empty() {
+                    write!(f, "(,)")
+                } else {
+                    let n = elems.len();
+                    for (i, e) in elems.iter().enumerate() {
+                        if i == 0 {
+                            write!(f, "({e},")?;
+                        } else if i > 0 && i == n - 1 {
+                            write!(f, " {}", e)?;
+                        } else {
+                            write!(f, " {},", e)?;
+                        }
+                    }
+                    write!(f, ")")
+                }
+            }
             Type::App { head, args } => match context {
                 TypeFormatContext::Neutral | TypeFormatContext::AppLeft => {
                     (*head).fmt_with_context(f, TypeFormatContext::AppLeft)?;
@@ -313,6 +337,11 @@ impl Type {
                     *v = new_var.clone();
                 }
             }
+            Type::Tuple(elems) => {
+                for e in elems.iter_mut() {
+                    e.rename_vars(substitution);
+                }
+            }
         }
     }
 }
@@ -323,6 +352,10 @@ pub enum Expr {
     Int(Loc, i64),
     Str(Loc, String),
     Char(Loc, char),
+    Tuple {
+        loc: Loc,
+        elems: Vec<Expr>,
+    },
     List {
         loc: Loc,
         elems: Vec<Expr>,
@@ -358,6 +391,7 @@ impl Expr {
             Expr::Int(_, _) => HashSet::new(),
             Expr::Str(_, _) => HashSet::new(),
             Expr::Char(_, _) => HashSet::new(),
+            Expr::Tuple { elems, .. } => elems.iter().flat_map(Self::free_variables).collect(),
             Expr::List { elems, tail, .. } => {
                 let mut vars: HashSet<&String> =
                     elems.iter().flat_map(Self::free_variables).collect();
@@ -429,6 +463,7 @@ impl HasLoc for Expr {
             Self::Int(loc, _) => *loc,
             Self::Str(loc, _) => *loc,
             Self::Char(loc, _) => *loc,
+            Self::Tuple { loc, .. } => *loc,
             Self::List { loc, .. } => *loc,
             Self::Case { loc, .. } => *loc,
             Self::Func { loc, .. } => *loc,
@@ -657,6 +692,9 @@ impl Type {
                 }
             }
             SourceType::Var(_, v) => Type::Var(v.to_string()),
+            SourceType::Tuple { elems, .. } => {
+                Type::Tuple(elems.into_iter().map(Self::from_source_type).collect())
+            }
         }
     }
 }

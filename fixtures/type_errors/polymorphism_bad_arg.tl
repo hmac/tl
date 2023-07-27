@@ -11,5 +11,5 @@ Error:
    5: main : Int {
    6:   apply (x -> + x 1) True
                            ^^^^
-                            expected this to have the type Int, but it actually has the type Bool
+                            expected this to have the type Int but it actually has the type Bool
 

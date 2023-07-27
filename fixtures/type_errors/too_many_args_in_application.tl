@@ -16,4 +16,4 @@ Error:
   11: 
   12: bar : Int { foo 2 3 }
                   ^^^^^
-                   expected this to have the type Int -> Int, but it actually has the type Int
+                   expected this to have the type Int -> Int but it actually has the type Int

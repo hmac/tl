@@ -8,4 +8,4 @@ Error:
    2: main : (a -> b) -> b -> c -> c {
    3:   f x -> x
                ^
-                expected this to have the type c -> c, but it actually has the type b
+                expected this to have the type c -> c but it actually has the type b

@@ -23,4 +23,4 @@ Error:
   17: main : Int {
   18:   length (convert (Cons2 1 Nil2))
                          ^^^^^
-                          expected this to have the type List, but it actually has the type List2
+                          expected this to have the type List but it actually has the type List2

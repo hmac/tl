@@ -28,8 +28,8 @@ impl From<io::Error> for Error {
 }
 
 pub struct Runner<'a> {
-    path: PathBuf,
-    source: String,
+    _path: PathBuf,
+    _source: String,
     ast: Vec<Decl>,
     vm: vm::Vm,
     output: Box<dyn Write + 'a>,
@@ -123,8 +123,8 @@ impl<'a> Runner<'a> {
                 let vm = vm::Vm::from_compiler(compiler);
 
                 Ok(Self {
-                    path: path.to_owned(),
-                    source,
+                    _path: path.to_owned(),
+                    _source: source,
                     ast,
                     vm,
                     output: Box::new(output),

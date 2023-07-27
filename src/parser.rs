@@ -260,6 +260,57 @@ impl Parser {
         self.make_type_from_components(components)
     }
 
+    // This identical to parse_tuple_or_parenthesised_expr but parses types instead of expressions.
+    // Can we merge the two?
+    fn parse_tuple_or_parenthesised_type(&mut self) -> Result<SourceType, Error> {
+        let loc = self.loc;
+        self.eat("(")?;
+        self.trim();
+        if self.input().starts_with(",") {
+            // We are parsing unit (,) or there's a parse error
+            self.eat(",")?;
+            self.trim();
+            self.eat(")")?;
+            let r = SourceType::Tuple {
+                loc: (loc, self.loc),
+                elems: vec![],
+            };
+            self.trim();
+            return Ok(r);
+        } else {
+            let elem1 = self.parse_type()?;
+            self.trim();
+            if self.input().starts_with(")") {
+                // We've parsed a parenthesised expression
+                self.eat(")")?;
+                self.trim();
+                Ok(elem1)
+            } else {
+                // We are parsing a tuple
+                let mut elems = vec![elem1];
+                loop {
+                    self.trim();
+                    if self.input().starts_with(")") {
+                        break;
+                    }
+                    self.eat(",")?;
+                    self.trim();
+                    if self.input().starts_with(")") {
+                        break;
+                    }
+                    elems.push(self.parse_type()?);
+                }
+                self.eat(")")?;
+                let r = SourceType::Tuple {
+                    loc: (loc, self.loc),
+                    elems,
+                };
+                self.trim();
+                Ok(r)
+            }
+        }
+    }
+
     // Like `parse_type`, but in a context where multi-word types must be parenthesised.
     // e.g.
     // Bool
@@ -268,14 +319,7 @@ impl Parser {
     // (Foo -> Bar Baz)
     fn parse_type_nested(&mut self) -> Result<SourceType, Error> {
         if self.input().starts_with("(") {
-            // Parse a normal type
-            self.eat("(")?;
-            self.trim();
-            let ty = self.parse_type()?;
-            self.trim();
-            self.eat(")")?;
-            self.trim();
-            return Ok(ty);
+            return self.parse_tuple_or_parenthesised_type();
         } else {
             let loc = self.loc;
             if self.input().starts_with(upper_ident_char) {
@@ -499,11 +543,8 @@ impl Parser {
             return self.parse_list();
         }
         if self.input().starts_with("(") {
-            self.eat("(")?;
-            let e = self.parse_expr()?;
-            self.eat(")")?;
-            self.trim();
-            return Ok(e);
+            // The expression could be a tuple or a parenthesised expression
+            return self.parse_tuple_or_parenthesised_expression();
         }
         if self.input().starts_with(lower_ident_char) || self.input().starts_with(upper_ident_char)
         {
@@ -521,6 +562,55 @@ impl Parser {
             }
         }
         Err(Error::ExpectedExpr((self.loc, self.loc)))
+    }
+
+    fn parse_tuple_or_parenthesised_expression(&mut self) -> Result<Expr, Error> {
+        let loc = self.loc;
+        self.eat("(")?;
+        self.trim();
+        if self.input().starts_with(",") {
+            // We are parsing unit (,) or there's a parse error
+            self.eat(",")?;
+            self.trim();
+            self.eat(")")?;
+            let r = Expr::Tuple {
+                loc: (loc, self.loc),
+                elems: vec![],
+            };
+            self.trim();
+            return Ok(r);
+        } else {
+            let elem1 = self.parse_expr()?;
+            self.trim();
+            if self.input().starts_with(")") {
+                // We've parsed a parenthesised expression
+                self.eat(")")?;
+                self.trim();
+                Ok(elem1)
+            } else {
+                // We are parsing a tuple
+                let mut elems = vec![elem1];
+                loop {
+                    self.trim();
+                    if self.input().starts_with(")") {
+                        break;
+                    }
+                    self.eat(",")?;
+                    self.trim();
+                    if self.input().starts_with(")") {
+                        break;
+                    }
+                    elems.push(self.parse_expr()?);
+                }
+                self.eat(")")?;
+                let r = Expr::Tuple {
+                    loc: (loc, self.loc),
+                    elems,
+                };
+                self.trim();
+                Ok(r)
+            }
+        }
     }
 
     fn parse_var_or_constructor(&mut self) -> Result<Var, Error> {

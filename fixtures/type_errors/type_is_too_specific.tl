@@ -9,4 +9,4 @@ Error:
    3: main : a -> a {
    4:   _ -> True
              ^^^^
-              expected this to have the type a, but it actually has the type Bool
+              expected this to have the type a but it actually has the type Bool

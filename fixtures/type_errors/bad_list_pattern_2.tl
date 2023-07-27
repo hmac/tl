@@ -10,4 +10,4 @@ Error:
    3:   x -> case x {
    4:     [True] -> 0,
            ^^^^
-            expected this to have the type Int, but it actually has the type Bool
+            expected this to have the type Int but it actually has the type Bool

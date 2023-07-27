@@ -14,4 +14,4 @@ Error:
    5:     // This constructor does not have the same type as the target
    6:     Left -> True,
           ^^^^^
-           expected this to have the type Bool, but it actually has the type Dir
+           expected this to have the type Bool but it actually has the type Dir
