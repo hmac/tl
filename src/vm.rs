@@ -106,6 +106,11 @@ impl Vm {
                     stack.push(Value::Str(s.to_string()));
                     ip += 1;
                 }
+                Instruction::PushChar(c) => {
+                    debug!("push_char({c})");
+                    stack.push(Value::Char(*c));
+                    ip += 1;
+                }
                 Instruction::PushGlobal(v) => {
                     let (func_block_id, args) = self.functions.get(v).unwrap();
                     let val = Value::Func {
@@ -539,6 +544,7 @@ pub enum Error {
 pub enum Value {
     Int(i64),
     Str(String),
+    Char(char),
     Bool(bool),
     ListCons(Box<Value>, Box<Value>),
     ListNil,
@@ -572,6 +578,10 @@ impl PartialEq for Value {
             },
             Self::Str(s1) => match other {
                 Self::Str(s2) => s1 == s2,
+                _ => unreachable!("self: {self:?} other: {other:?}"),
+            },
+            Self::Char(c1) => match other {
+                Self::Char(c2) => c1 == c2,
                 _ => unreachable!("self: {self:?} other: {other:?}"),
             },
             Self::Bool(n) => match other {
@@ -637,6 +647,7 @@ impl std::fmt::Display for Value {
         match self {
             Value::Int(n) => write!(f, "{}", n),
             Value::Str(s) => write!(f, "\"{}\"", s),
+            Value::Char(c) => write!(f, "'{c}'"),
             Value::Bool(true) => write!(f, "True"),
             Value::Bool(false) => write!(f, "False"),
             Value::Func { block_id, name, .. } => write!(f, "<func({}: {name})>", block_id.0),

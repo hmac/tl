@@ -284,6 +284,7 @@ impl Parser {
                     "Int" => SourceType::Int((loc, self.loc)),
                     "Bool" => SourceType::Bool((loc, self.loc)),
                     "String" => SourceType::Str((loc, self.loc)),
+                    "Char" => SourceType::Char((loc, self.loc)),
                     _ => SourceType::Named((loc, self.loc), type_name),
                 })
             } else {
@@ -401,6 +402,9 @@ impl Parser {
         }
         if self.input().starts_with("\"") {
             return self.parse_string();
+        }
+        if self.input().starts_with("'") {
+            return self.parse_char();
         }
 
         // Otherwise, it's a function application or a function
@@ -874,6 +878,16 @@ impl Parser {
             }
         }
         let r = Expr::Str((loc, self.loc), s);
+        self.trim();
+        Ok(r)
+    }
+
+    fn parse_char(&mut self) -> Result<Expr, Error> {
+        let loc = self.loc;
+        self.eat("'")?;
+        let c = self.eat_char()?;
+        self.eat("'")?;
+        let r = Expr::Char((loc, self.loc), c);
         self.trim();
         Ok(r)
     }

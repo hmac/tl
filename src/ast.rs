@@ -179,6 +179,7 @@ pub enum SourceType {
     Int(Loc),
     Bool(Loc),
     Str(Loc),
+    Char(Loc),
     App {
         loc: Loc,
         head: Box<SourceType>,
@@ -195,6 +196,7 @@ impl HasLoc for SourceType {
             Self::Int(loc) => *loc,
             Self::Bool(loc) => *loc,
             Self::Str(loc) => *loc,
+            Self::Char(loc) => *loc,
             Self::App { loc, .. } => *loc,
             Self::Var(loc, _) => *loc,
         }
@@ -208,6 +210,7 @@ pub enum Type {
     Func(Box<Type>, Box<Type>),
     Int,
     Str,
+    Char,
     Bool,
     App { head: Box<Type>, args: Vec<Type> },
     Var(String),
@@ -222,7 +225,7 @@ impl std::fmt::Display for Type {
 impl Type {
     pub fn vars(&self) -> Vec<String> {
         match self {
-            Type::Named(_) | Type::Int | Type::Bool | Type::Str => vec![],
+            Type::Named(_) | Type::Int | Type::Bool | Type::Str | Type::Char => vec![],
             Type::Func(f, x) => {
                 let mut vars = f.vars();
                 vars.append(&mut x.vars());
@@ -273,6 +276,7 @@ impl Type {
             Type::Int => write!(f, "Int"),
             Type::Str => write!(f, "String"),
             Type::Bool => write!(f, "Bool"),
+            Type::Char => write!(f, "Char"),
             Type::App { head, args } => match context {
                 TypeFormatContext::Neutral | TypeFormatContext::AppLeft => {
                     (*head).fmt_with_context(f, TypeFormatContext::AppLeft)?;
@@ -293,7 +297,7 @@ impl Type {
 
     pub fn rename_vars(&mut self, substitution: &HashMap<String, String>) {
         match self {
-            Type::Named(_) | Type::Int | Type::Bool | Type::Str => {}
+            Type::Named(_) | Type::Int | Type::Bool | Type::Str | Type::Char => {}
             Type::Func(f, x) => {
                 f.rename_vars(substitution);
                 x.rename_vars(substitution);
@@ -318,6 +322,7 @@ pub enum Expr {
     Var(Loc, Var),
     Int(Loc, i64),
     Str(Loc, String),
+    Char(Loc, char),
     List {
         loc: Loc,
         elems: Vec<Expr>,
@@ -352,6 +357,7 @@ impl Expr {
             Expr::Var(_, _) => HashSet::new(),
             Expr::Int(_, _) => HashSet::new(),
             Expr::Str(_, _) => HashSet::new(),
+            Expr::Char(_, _) => HashSet::new(),
             Expr::List { elems, tail, .. } => {
                 let mut vars: HashSet<&String> =
                     elems.iter().flat_map(Self::free_variables).collect();
@@ -422,6 +428,7 @@ impl HasLoc for Expr {
             Self::Var(loc, _) => *loc,
             Self::Int(loc, _) => *loc,
             Self::Str(loc, _) => *loc,
+            Self::Char(loc, _) => *loc,
             Self::List { loc, .. } => *loc,
             Self::Case { loc, .. } => *loc,
             Self::Func { loc, .. } => *loc,
@@ -640,6 +647,7 @@ impl Type {
             SourceType::Int(_) => Type::Int,
             SourceType::Bool(_) => Type::Bool,
             SourceType::Str(_) => Type::Str,
+            SourceType::Char(_) => Type::Char,
             SourceType::App { head, args, .. } => {
                 let head = Type::from_source_type(head);
                 let args = args.iter().map(|arg| Type::from_source_type(arg)).collect();

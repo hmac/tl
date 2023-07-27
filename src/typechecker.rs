@@ -7,6 +7,7 @@ use tracing::debug;
 
 const TYPE_INT: Type = Type::Int;
 const TYPE_STRING: Type = Type::Str;
+const TYPE_CHAR: Type = Type::Char;
 
 #[derive(Debug)]
 pub enum Error {
@@ -344,6 +345,9 @@ impl Typechecker {
             Expr::Str(loc, _) => {
                 self.assert_type_eq(type_variables, expected_type, &TYPE_STRING, *loc)
             }
+            Expr::Char(loc, _) => {
+                self.assert_type_eq(type_variables, expected_type, &TYPE_CHAR, *loc)
+            }
             Expr::Var(loc, v) => {
                 let ty = self.infer_var(local_variables, type_variables, v, *loc)?;
                 self.assert_type_eq(type_variables, expected_type, &ty, *loc)
@@ -665,6 +669,7 @@ impl Typechecker {
         match expr {
             Expr::Int(_, _) => Ok(TYPE_INT),
             Expr::Str(_, _) => Ok(TYPE_STRING),
+            Expr::Char(_, _) => Ok(TYPE_STRING),
             Expr::Var(loc, v) => self.infer_var(local_variables, type_variables, v, *loc),
             Expr::List { elems, tail, .. } => {
                 // If the list is empty, generate a fresh type variable `a` and return `List a`.
@@ -1179,6 +1184,8 @@ impl Typechecker {
             | (_, Type::Int)
             | (Type::Bool, _)
             | (_, Type::Bool)
+            | (Type::Char, _)
+            | (_, Type::Char)
             | (Type::Str, _)
             | (_, Type::Str) => Err(Error::ExpectedType {
                 loc,
@@ -1428,7 +1435,7 @@ impl Typechecker {
                 self.check_type(f, loc, vars_in_scope)?;
                 self.check_type(x, loc, vars_in_scope)?;
             }
-            Type::Int | Type::Bool | Type::Str => {}
+            Type::Int | Type::Bool | Type::Str | Type::Char => {}
             Type::App { head, args } => {
                 self.check_type(head, loc, vars_in_scope)?;
                 for arg in args {
