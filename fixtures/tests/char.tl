@@ -1,4 +1,4 @@
-a : Char { 'a' }
+a : Char { 'A' }
 
 b : Char { 'b' }
 

@@ -178,16 +178,9 @@ impl Vm {
                 Instruction::Ctor(c, len) => {
                     let mut args = stack.split_off(stack.len() - *len as usize);
                     args.reverse();
-                    let val = if c == "Cons" {
-                        assert_eq!(args.len(), 2);
-                        let arg1 = args.pop().unwrap();
-                        let arg0 = args.pop().unwrap();
-                        Value::ListCons(Box::new(arg0), Box::new(arg1))
-                    } else {
-                        Value::Constructor {
-                            name: c.to_string(),
-                            args,
-                        }
+                    let val = Value::Constructor {
+                        name: c.to_string(),
+                        args,
                     };
                     stack.push(val);
                     ip += 1;
@@ -435,26 +428,6 @@ fn eval_case<'a>(
 fn match_pattern<'a>(target: &'a Value, pattern: &Pattern) -> Option<Vec<&'a Value>> {
     match pattern {
         Pattern::Constructor { name, args, .. } => match target {
-            Value::ListCons(x, xs) => {
-                if name == "Cons" {
-                    match (match_pattern(x, &args[0]), match_pattern(xs, &args[1])) {
-                        (Some(mut x_bound), Some(mut xs_bound)) => {
-                            x_bound.append(&mut xs_bound);
-                            Some(x_bound)
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            }
-            Value::ListNil => {
-                if name == "Nil" {
-                    Some(vec![])
-                } else {
-                    None
-                }
-            }
             Value::Bool(true) => {
                 if name == "True" {
                     Some(vec![])
@@ -630,13 +603,6 @@ impl PartialEq for Value {
                     name: name_r,
                     args: args_r,
                 } => name_l == name_r && args_l == args_r,
-                Self::ListNil => name_l == "Nil",
-                Self::ListCons(arg1, arg2) => {
-                    name_l == "Cons"
-                        && args_l.len() == 2
-                        && args_l[0] == **arg1
-                        && args_l[1] == **arg2
-                }
                 _ => unreachable!("{:?} == {:?}", self, other),
             },
             Self::ListNil => match other {

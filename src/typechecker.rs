@@ -225,10 +225,6 @@ impl Typechecker {
         let mut constructors = HashMap::new();
         types.insert("List".to_string(), vec!["a".to_string()]);
 
-        constructors.insert(
-            "False".to_string(),
-            ("Bool".to_string(), (0, 0), Type::Bool),
-        );
         types.insert("Bool".to_string(), vec![]);
         // Insert the constructors for Bool, which is a built-in type.
         // The locations are fake.
@@ -1176,9 +1172,7 @@ impl Typechecker {
                             new_vars.insert(name.to_string(), ty.clone());
                         }
                         Pattern::Int { .. } | Pattern::Wildcard { .. } => {}
-                        Pattern::Constructor { .. } => todo!(),
-                        Pattern::ListNil { .. } => todo!(),
-                        Pattern::ListCons { .. } => todo!(),
+                        _ => todo!(),
                     }
                 }
                 let local_variables = local_variables.extend(new_vars);
