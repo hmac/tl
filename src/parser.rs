@@ -431,24 +431,8 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, Error> {
-        if self.input().starts_with(numeric_char) {
-            let (loc, n) = self.parse_int()?;
-            return Ok(Expr::Int(loc, n));
-        }
-        if self.input().starts_with("case") {
-            return self.parse_case();
-        }
-        if self.input().starts_with("let") {
-            return self.parse_let();
-        }
-        if self.input().starts_with("[") {
-            return self.parse_list();
-        }
-        if self.input().starts_with("\"") {
-            return self.parse_string();
-        }
-        if self.input().starts_with("'") {
-            return self.parse_char();
+        if let Some(expr) = self.maybe_parse_atomic_expr()? {
+            return Ok(expr);
         }
 
         // Otherwise, it's a function application or a function
@@ -527,24 +511,40 @@ impl Parser {
         }
     }
 
-    /// Like `parse_expr` but functions and applications must be wrapped in parens.
-    fn parse_expr_nested(&mut self) -> Result<Expr, Error> {
+    /// Attempt to parse an expression which is totally unambiguous.
+    /// This is shared code between `parsed_expr` and `parse_expr_nested` which handles expressions
+    /// that have a unique leading character.
+    fn maybe_parse_atomic_expr(&mut self) -> Result<Option<Expr>, Error> {
         if self.input().starts_with(numeric_char) {
             let (loc, n) = self.parse_int()?;
-            return Ok(Expr::Int(loc, n));
+            return Ok(Some(Expr::Int(loc, n)));
         }
         if self.input().starts_with("case") {
-            return self.parse_case();
+            return self.parse_case().map(Some);
         }
         if self.input().starts_with("let") {
-            return self.parse_let();
+            return self.parse_let().map(Some);
         }
         if self.input().starts_with("[") {
-            return self.parse_list();
+            return self.parse_list().map(Some);
+        }
+        if self.input().starts_with("\"") {
+            return self.parse_string().map(Some);
+        }
+        if self.input().starts_with("'") {
+            return self.parse_char().map(Some);
         }
         if self.input().starts_with("(") {
             // The expression could be a tuple or a parenthesised expression
-            return self.parse_tuple_or_parenthesised_expression();
+            return self.parse_tuple_or_parenthesised_expression().map(Some);
+        }
+        Ok(None)
+    }
+
+    /// Like `parse_expr` but functions and applications must be wrapped in parens.
+    fn parse_expr_nested(&mut self) -> Result<Expr, Error> {
+        if let Some(expr) = self.maybe_parse_atomic_expr()? {
+            return Ok(expr);
         }
         if self.input().starts_with(lower_ident_char) || self.input().starts_with(upper_ident_char)
         {
