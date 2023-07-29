@@ -163,7 +163,7 @@ test reverse_empty { == (reverse []) [] }
 intersperse : a -> List a -> List a {
   sep l -> case l {
     [] -> [],
-    [x] -> [x]
+    [x] -> [x],
     [x, ..xs] -> [x, sep, ..intersperse sep xs]
   }
 }
