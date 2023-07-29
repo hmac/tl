@@ -524,6 +524,10 @@ pub enum Pattern {
         elems: Vec<Pattern>,
         tail: Option<Box<Pattern>>,
     },
+    Tuple {
+        loc: Loc,
+        elems: Vec<Pattern>,
+    },
 }
 
 impl Pattern {
@@ -541,6 +545,7 @@ impl Pattern {
                 }
                 vars
             }
+            Pattern::Tuple { elems, .. } => elems.iter().flat_map(Self::vars).collect(),
         }
     }
 
@@ -567,6 +572,7 @@ impl Pattern {
                 }
                 vars
             }
+            Pattern::Tuple { elems, .. } => elems.iter().flat_map(Self::ordered_vars).collect(),
         }
     }
 }
@@ -602,6 +608,17 @@ impl std::fmt::Display for Pattern {
                 }
                 Ok(())
             }
+            Pattern::Tuple { elems, .. } => {
+                write!(f, "(")?;
+                let mut elems_iter = elems.iter();
+                if let Some(e) = elems_iter.next() {
+                    write!(f, "{}", e)?;
+                }
+                for e in elems_iter {
+                    write!(f, ", {}", e)?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }
@@ -615,6 +632,7 @@ impl HasLoc for Pattern {
             Self::Wildcard { loc, .. } => *loc,
             Self::ListNil { loc } => *loc,
             Self::ListCons { loc, .. } => *loc,
+            Self::Tuple { loc, .. } => *loc,
         }
     }
 }

@@ -172,7 +172,6 @@ impl Vm {
                     for _ in 0..*len {
                         elems.push(stack.pop().expect("MakeTuple: empty stack"));
                     }
-                    elems.reverse();
                     stack.push(Value::Tuple(elems));
                     ip += 1;
                 }
@@ -536,6 +535,17 @@ fn match_pattern<'a>(target: &'a Value, pattern: &Pattern) -> Option<Vec<&'a Val
                     }
                     Some(elem_matches)
                 }
+            }
+            _ => None,
+        },
+        Pattern::Tuple { elems, .. } => match target {
+            Value::Tuple(xs) => {
+                // Match each element in `xs` with the coresponding pattern in `elems`
+                let mut matches = vec![];
+                for (p, x) in elems.iter().zip(xs.iter()) {
+                    matches.append(&mut match_pattern(x, p)?);
+                }
+                Some(matches)
             }
             _ => None,
         },

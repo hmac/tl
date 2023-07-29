@@ -917,6 +917,17 @@ impl Typechecker {
                     )?);
                 }
             }
+            Pattern::Tuple { loc, elems } => {
+                // The expected type must be a tuple type with the same number of elements
+                let mut ty_vars = vec![];
+                for p in elems {
+                    let var = self.make_fresh_var(type_variables);
+                    new_vars.extend(self.check_match_branch_pattern(type_variables, p, &var)?);
+                    ty_vars.push(var);
+                }
+                let tuple_type = Type::Tuple(ty_vars.clone());
+                self.assert_type_eq(type_variables, expected_type, &tuple_type, *loc)?;
+            }
             Pattern::Wildcard { .. } => {}
             Pattern::Constructor {
                 name, args, loc, ..
@@ -998,6 +1009,7 @@ impl Typechecker {
                 }
                 Ok(())
             }
+            Type::Tuple(_) => Ok(()),
             _ => {
                 let type_name = {
                     let n;
@@ -1041,7 +1053,7 @@ impl Typechecker {
 
                 for p in branch_patterns {
                     match p {
-                        Pattern::Var { .. } | Pattern::Wildcard { .. } => {
+                        Pattern::Var { .. } | Pattern::Wildcard { .. } | Pattern::Tuple { .. } => {
                             return Ok(());
                         }
                         Pattern::Constructor { name, .. } => {
@@ -1172,6 +1184,27 @@ impl Typechecker {
                 let local_variables = local_variables.extend(new_vars);
 
                 // Infer the rhs
+                self.infer_expr(&local_variables, type_variables, &branch.rhs)
+            }
+            Pattern::Tuple { elems, loc } => {
+                // The target type must be a tuple type with the same number of elements
+                let mut vars = vec![];
+                let mut new_locals = HashMap::new();
+                for pattern in elems {
+                    let var = self.make_fresh_var(type_variables);
+                    // Check each subpattern, and collect any bound variables
+                    new_locals.extend(self.check_match_branch_pattern(
+                        type_variables,
+                        pattern,
+                        &var,
+                    )?);
+                    vars.push(var);
+                }
+                let tuple_type = Type::Tuple(vars.clone());
+                self.assert_type_eq(type_variables, &target_type, &tuple_type, *loc)?;
+
+                // Infer the rhs
+                let local_variables = local_variables.extend(new_locals);
                 self.infer_expr(&local_variables, type_variables, &branch.rhs)
             }
         }

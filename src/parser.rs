@@ -819,6 +819,28 @@ impl Parser {
             }
         }
 
+        if self.input().starts_with("(") {
+            let loc = self.loc;
+            self.eat("(")?;
+            let mut elems = vec![];
+            loop {
+                self.trim();
+                if self.input().starts_with(")") {
+                    break;
+                }
+                elems.push(self.parse_pattern()?);
+                self.trim();
+                self.try_eat(",");
+            }
+            self.eat(")")?;
+            let r = Pattern::Tuple {
+                loc: (loc, self.loc),
+                elems,
+            };
+            self.trim();
+            return Ok(r);
+        }
+
         let loc = self.loc;
         let name = self.parse_upper_ident()?;
         self.trim();
