@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    path::PathBuf,
+};
 
 /// (start, end) index pair into the source string
 pub type Loc = (usize, usize);
@@ -140,6 +143,11 @@ pub enum Decl {
         r#type: SourceType,
         body: Expr,
     },
+    Import {
+        loc: Loc,
+        name: String,
+        path: PathBuf,
+    },
     Test {
         loc: Loc,
         name: String,
@@ -152,6 +160,7 @@ impl HasLoc for Decl {
         match self {
             Self::Type { loc, .. } => *loc,
             Self::Func { loc, .. } => *loc,
+            Self::Import { loc, .. } => *loc,
             Self::Test { loc, .. } => *loc,
         }
     }

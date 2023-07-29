@@ -70,6 +70,12 @@ impl<'a> Runner<'a> {
                             typechecker.register_func(&name, &r#type, *loc).unwrap();
                         }
                         Decl::Test { .. } => {}
+                        Decl::Import { name, path, .. } => {
+                            // Register the file as an import for the current file
+                            // Load it
+                            // Make its definitions available to the current file
+                            todo!()
+                        }
                     }
                 }
 

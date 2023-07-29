@@ -2,7 +2,7 @@ use crate::ast::{
     CaseBranch, Decl, Expr, HasLoc, LetBinding, Loc, Operator, Pattern, SourceType,
     TypeConstructor, Var,
 };
-use std::collections::VecDeque;
+use std::{collections::VecDeque, path::PathBuf};
 
 #[derive(Debug)]
 pub enum Error {
@@ -17,6 +17,7 @@ pub enum Error {
     UnexpectedEof(Loc),
     ExpectedType(Loc),
     UnknownStringEscapeSequence(Loc),
+    FilePathIsNotRelative(Loc),
 }
 
 impl HasLoc for Error {
@@ -33,6 +34,7 @@ impl HasLoc for Error {
             Error::UnexpectedEof(loc) => *loc,
             Error::ExpectedType(loc) => *loc,
             Error::UnknownStringEscapeSequence(loc) => *loc,
+            Error::FilePathIsNotRelative(loc) => *loc,
         }
     }
 }
@@ -72,6 +74,9 @@ impl std::fmt::Display for Error {
             }
             Error::UnknownStringEscapeSequence(_) => {
                 write!(f, "unknown string escape sequence")
+            }
+            Error::FilePathIsNotRelative(_) => {
+                write!(f, "file path must be relative")
             }
         }
     }
@@ -211,27 +216,64 @@ impl Parser {
                         body,
                     })
                 }
-                None => {
-                    let name = self.parse_lower_ident()?;
-                    self.trim();
-                    self.eat(":")?;
-                    self.trim();
-                    let r#type = self.parse_type()?;
-                    self.trim();
-                    self.eat("{")?;
-                    self.trim();
-                    let body = self.parse_expr()?;
-                    self.trim();
-                    self.eat("}")?;
-                    self.trim();
-                    Ok(Decl::Func {
-                        loc: (loc, self.loc),
-                        name,
-                        r#type,
-                        body,
-                    })
-                }
+                None => match self.try_eat("use") {
+                    Some(_) => {
+                        self.trim();
+                        let path = self.parse_relative_path()?;
+                        self.trim();
+                        self.eat("as")?;
+                        self.trim();
+                        let name = self.parse_lower_ident()?;
+                        let r = Decl::Import {
+                            loc: (loc, self.loc),
+                            path,
+                            name,
+                        };
+                        self.trim();
+                        Ok(r)
+                    }
+                    None => {
+                        let name = self.parse_lower_ident()?;
+                        self.trim();
+                        self.eat(":")?;
+                        self.trim();
+                        let r#type = self.parse_type()?;
+                        self.trim();
+                        self.eat("{")?;
+                        self.trim();
+                        let body = self.parse_expr()?;
+                        self.trim();
+                        self.eat("}")?;
+                        self.trim();
+                        Ok(Decl::Func {
+                            loc: (loc, self.loc),
+                            name,
+                            r#type,
+                            body,
+                        })
+                    }
+                },
             },
+        }
+    }
+
+    fn parse_relative_path(&mut self) -> Result<PathBuf, Error> {
+        let loc = self.loc;
+        let mut len = 0;
+        while !self.input()[len..].starts_with(char::is_whitespace) {
+            len += 1;
+        }
+
+        let (s, _) = self.input().split_at(len);
+        let path: PathBuf = s.parse().unwrap_or_else(|never| match never {});
+        self.loc += len;
+        let loc_end = self.loc;
+        self.trim();
+
+        if !path.is_relative() {
+            Err(Error::FilePathIsNotRelative((loc, loc_end)))
+        } else {
+            Ok(path)
         }
     }
 
