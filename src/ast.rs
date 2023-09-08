@@ -146,7 +146,9 @@ pub enum Decl {
     Import {
         loc: Loc,
         name: String,
+        name_loc: Loc,
         path: PathBuf,
+        path_loc: Loc,
     },
     Test {
         loc: Loc,
@@ -646,12 +648,34 @@ impl HasLoc for Pattern {
     }
 }
 
+/// The name of an import, e.g. `myName` in
+///   import ./path/to/file.tl as myName
+#[derive(Debug, Clone)]
+pub struct Namespace(String);
+
+impl Namespace {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for Namespace {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Display for Namespace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Var {
-    // TODO: store global variables (i.e. functions) separately.
-    // This makes it easier to know what variables a function is capturing.
     Local(String),
-    Constructor(String),
+    Global(Option<Namespace>, String),
+    Constructor(Option<Namespace>, String),
     Operator(Operator),
 }
 

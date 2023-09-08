@@ -219,15 +219,21 @@ impl Parser {
                 None => match self.try_eat("use") {
                     Some(_) => {
                         self.trim();
+                        let path_loc_start = self.loc;
                         let path = self.parse_relative_path()?;
+                        let path_loc = (path_loc_start, self.loc);
                         self.trim();
                         self.eat("as")?;
                         self.trim();
+                        let name_loc_start = self.loc;
                         let name = self.parse_lower_ident()?;
+                        let name_loc = (name_loc_start, self.loc);
                         let r = Decl::Import {
                             loc: (loc, self.loc),
                             path,
+                            path_loc,
                             name,
+                            name_loc,
                         };
                         self.trim();
                         Ok(r)
@@ -667,12 +673,48 @@ impl Parser {
         if self.input().starts_with(upper_ident_char) {
             let n = self.parse_upper_ident()?;
             let s = format!("{}{n}", "_".repeat(leading_underscores));
-            return Ok(Var::Constructor(s));
+            return Ok(Var::Constructor(None, s));
         }
 
         if self.input().starts_with(lower_ident_char) {
             let n = self.parse_lower_ident()?;
             let s = format!("{}{n}", "_".repeat(leading_underscores));
+
+            // If there's a dot, then we're parsing a namespaced constructor/variable
+            if self.input().starts_with(".") {
+                self.eat(".")?;
+
+                let namespace = s;
+                let loc = self.loc;
+
+                let mut leading_underscores = 0;
+                while self.input().starts_with('_') {
+                    self.eat("_")?;
+                    leading_underscores += 1;
+                }
+
+                if self.input().starts_with(upper_ident_char) {
+                    let n = self.parse_upper_ident()?;
+                    let s = format!("{}{n}", "_".repeat(leading_underscores));
+                    return Ok(Var::Constructor(Some(namespace.into()), s));
+                }
+
+                if self.input().starts_with(lower_ident_char) {
+                    let n = self.parse_lower_ident()?;
+                    let v = format!("{}{n}", "_".repeat(leading_underscores));
+                    return Ok(Var::Global(Some(namespace.into()), v));
+                }
+
+                // If we've reached here, we've parsed only some underscores,
+                // with a namespace, e.g. foo.___
+                // This is a weird name but it doesn't seem worth banning it right now.
+                if leading_underscores > 0 {
+                    let s = "_".repeat(leading_underscores);
+                    return Ok(Var::Global(Some(namespace.into()), s));
+                } else {
+                    return Err(Error::ExpectedLowerIdent((loc, self.loc)));
+                }
+            }
             return Ok(Var::Local(s));
         }
 

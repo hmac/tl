@@ -1,8 +1,11 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use tracing::debug;
 
-use crate::ast::{Expr, Loc, Operator, Pattern, Var};
+use crate::{
+    ast::{Expr, Loc, Operator, Pattern, Var},
+    typechecker::{GlobalName, Imports},
+};
 
 /// Compiles expressions to VM instructions
 pub struct Compiler {
@@ -10,22 +13,26 @@ pub struct Compiler {
     // name => (start instruction, arg names)
     pub functions: HashMap<String, (BlockId, Vec<String>)>,
     rng: tinyrand::StdRand,
+    imports: Imports,
 }
 
 impl Compiler {
-    pub fn new() -> Self {
+    pub fn new(imports: Imports) -> Self {
         let mut _self = Self {
             program: Program::new(),
             functions: HashMap::new(),
             rng: tinyrand::StdRand::default(),
+            imports,
         };
 
-        _self.compile_operators();
+        // Invent a fake path to compile operators
+        // TODO: fix it so we don't need to do this
+        _self.compile_operators(Path::new("builtin"));
 
         _self
     }
 
-    pub fn compile_func(&mut self, name: &str, body: &Expr) -> Result<(), Error> {
+    pub fn compile_func(&mut self, path: &Path, name: &str, body: &Expr) -> Result<(), Error> {
         // If the body is a function, compile it without an additional lambda lift
         // This prevents e.g.
         //
@@ -46,18 +53,20 @@ impl Compiler {
                 for (_, a) in args.iter().rev() {
                     locals.push(a.to_string());
                 }
-                let ins = self.compile_expr(name, body, locals, true)?;
+                let ins = self.compile_expr(path, name, body, locals, true)?;
                 (ins, args.iter().map(|(_, n)| n.to_string()).collect())
             }
-            e => (self.compile_expr(name, e, Vec::new(), true)?, vec![]),
+            e => (self.compile_expr(path, name, e, Vec::new(), true)?, vec![]),
         };
         let id = self.program.add_block(ins);
+        let name = GlobalName::named(path, name);
         self.functions.insert(name.to_string(), (id, args));
         Ok(())
     }
 
     fn compile_expr(
         &mut self,
+        path: &Path,
         func_name: &str,
         expr: &Expr,
         locals: Vec<String>,
@@ -76,23 +85,26 @@ impl Compiler {
                     None => {
                         // Call the global to ensure it is evaluated to normal form
                         ins.push(Instruction::PushInt(0));
-                        ins.push(Instruction::PushGlobal(v.to_string()));
+                        let name = GlobalName::named(path, v);
+                        ins.push(Instruction::PushGlobal(name.to_string()));
                         ins.push(Instruction::Call);
                     }
                 }
             }
-            Expr::Var(_, Var::Constructor(c)) => {
+            Expr::Var(_, Var::Global(_, _)) => todo!(),
+            Expr::Var(_, Var::Constructor(_ns, c)) => {
                 debug!("{:?}", c);
                 ins.push(Instruction::PushCtor(c.clone()));
             }
             Expr::Var(_, Var::Operator(op)) => {
-                ins.push(match op {
-                    Operator::Add => Instruction::PushGlobal("+".to_string()),
-                    Operator::Sub => Instruction::PushGlobal("-".to_string()),
-                    Operator::Mul => Instruction::PushGlobal("*".to_string()),
-                    Operator::Lt => Instruction::PushGlobal("<".to_string()),
-                    Operator::Eq => Instruction::PushGlobal("==".to_string()),
-                });
+                let op_name = match op {
+                    Operator::Add => "+",
+                    Operator::Sub => "-",
+                    Operator::Mul => "*",
+                    Operator::Lt => "<",
+                    Operator::Eq => "==",
+                };
+                ins.push(Instruction::PushGlobal(format!("builtin:{op_name}")));
             }
             Expr::Int(_, i) => {
                 ins.push(Instruction::PushInt(*i));
@@ -108,26 +120,50 @@ impl Compiler {
                 // Compile the tail expression, if present
                 // Otherwise push Nil
                 if let Some(tail) = tail {
-                    ins.append(&mut self.compile_expr(func_name, tail, locals.clone(), false)?);
+                    ins.append(&mut self.compile_expr(
+                        path,
+                        func_name,
+                        tail,
+                        locals.clone(),
+                        false,
+                    )?);
                 } else {
                     ins.push(Instruction::PushCtor("Nil".to_string()));
                 }
                 for e in elems.iter().rev() {
-                    ins.append(&mut self.compile_expr(func_name, e, locals.clone(), false)?);
+                    ins.append(&mut self.compile_expr(
+                        path,
+                        func_name,
+                        e,
+                        locals.clone(),
+                        false,
+                    )?);
                 }
                 ins.push(Instruction::MakeList(elems.len() as u8));
             }
             Expr::Tuple { elems, .. } => {
                 assert!(elems.len() <= (u8::MAX as usize));
                 for e in elems.iter().rev() {
-                    ins.append(&mut self.compile_expr(func_name, e, locals.clone(), false)?);
+                    ins.append(&mut self.compile_expr(
+                        path,
+                        func_name,
+                        e,
+                        locals.clone(),
+                        false,
+                    )?);
                 }
                 ins.push(Instruction::MakeTuple(elems.len() as u8));
             }
             Expr::Case {
                 target, branches, ..
             } => {
-                ins.append(&mut self.compile_expr(func_name, target, locals.clone(), false)?);
+                ins.append(&mut self.compile_expr(
+                    path,
+                    func_name,
+                    target,
+                    locals.clone(),
+                    false,
+                )?);
                 // Compile each branch, and determine their start locations
                 let mut pattern_locs = vec![];
                 for branch in branches {
@@ -136,7 +172,8 @@ impl Compiler {
                     for var in branch.pattern.ordered_vars() {
                         locals.push(var);
                     }
-                    let branch_ins = self.compile_expr(func_name, &branch.rhs, locals, is_leaf)?;
+                    let branch_ins =
+                        self.compile_expr(path, func_name, &branch.rhs, locals, is_leaf)?;
                     let branch_id = self.program.add_block(branch_ins);
                     pattern_locs.push((branch.pattern.clone(), branch_id));
                 }
@@ -145,7 +182,7 @@ impl Compiler {
             }
             Expr::Func { args, body, .. } => {
                 // Lift the function, then apply any captured variables
-                let name = self.lift_func(&locals, args, body)?;
+                let name = self.lift_func(path, &locals, args, body)?;
                 for (i, _) in locals.iter().enumerate() {
                     ins.push(Instruction::PushVar(i));
                 }
@@ -160,10 +197,11 @@ impl Compiler {
                 // If it is a function literal, lambda lift it
                 // If it is a complex expression, compile that first
                 match &**head {
-                    Expr::Var(_, Var::Constructor(c)) => {
+                    Expr::Var(_, Var::Constructor(_ns, c)) => {
                         debug!("head: {:?}", c);
                         for a in args.iter().rev() {
                             ins.append(&mut self.compile_expr(
+                                path,
                                 func_name,
                                 a,
                                 locals.clone(),
@@ -173,8 +211,11 @@ impl Compiler {
                         ins.push(Instruction::Ctor(c.clone(), args.len() as u8));
                     }
                     Expr::Var(_, Var::Local(v)) => {
+                        // Note: v might still be a global, as it may refer to a definition in the
+                        // current file (so has no namespace qualifier in the source code).
                         for a in args.iter().rev() {
                             ins.append(&mut self.compile_expr(
+                                path,
                                 func_name,
                                 a,
                                 locals.clone(),
@@ -197,14 +238,43 @@ impl Compiler {
                         } else {
                             ins.push(match local_var_index {
                                 Some(index) => Instruction::PushVar(index),
-                                None => Instruction::PushGlobal(v.clone()),
+                                None => {
+                                    let name = GlobalName::named(path, v);
+                                    Instruction::PushGlobal(name.to_string())
+                                }
                             });
+                            ins.push(Instruction::Call);
+                        }
+                    }
+                    Expr::Var(_, Var::Global(ns, v)) => {
+                        for a in args.iter().rev() {
+                            ins.append(&mut self.compile_expr(
+                                path,
+                                func_name,
+                                a,
+                                locals.clone(),
+                                false,
+                            )?);
+                        }
+
+                        ins.push(Instruction::PushInt(args.len() as i64));
+
+                        // If we're doing a tail call, use the TailCall instruction
+                        if is_leaf && v == func_name {
+                            ins.push(Instruction::TailCall);
+                        } else {
+                            let name = match ns {
+                                Some(ns) => self.imports.lookup(path, ns, v).unwrap(),
+                                None => GlobalName::named(path, v),
+                            };
+                            ins.push(Instruction::PushGlobal(name.to_string()));
                             ins.push(Instruction::Call);
                         }
                     }
                     Expr::Var(_, Var::Operator(o)) => {
                         for a in args.iter().rev() {
                             ins.append(&mut self.compile_expr(
+                                path,
                                 func_name,
                                 a,
                                 locals.clone(),
@@ -219,13 +289,14 @@ impl Compiler {
                             Operator::Eq => Instruction::Eq,
                         });
                     }
-                    _ => todo!(),
+                    h => todo!("{:?}", h),
                 }
             }
             Expr::Let { bindings, body, .. } => {
                 let mut locals = locals.clone();
                 for b in bindings {
                     ins.append(&mut self.compile_expr(
+                        path,
                         func_name,
                         &b.value,
                         locals.clone(),
@@ -233,7 +304,7 @@ impl Compiler {
                     )?);
                     locals.push(b.name.to_string());
                 }
-                ins.append(&mut self.compile_expr(func_name, body, locals, is_leaf)?);
+                ins.append(&mut self.compile_expr(path, func_name, body, locals, is_leaf)?);
             }
         };
         if is_leaf {
@@ -250,6 +321,7 @@ impl Compiler {
 
     fn lift_func(
         &mut self,
+        path: &Path,
         locals: &Vec<String>,
         args: &[(Loc, String)],
         body: &Expr,
@@ -263,8 +335,10 @@ impl Compiler {
         for (_, v) in args {
             body_locals.push(v.to_string())
         }
-        let name = self.generate_fresh_name();
+        let local_name = self.generate_fresh_name();
+        let name = GlobalName::named(path, &local_name).to_string();
         let ins = self.compile_expr(
+            path,
             &name,
             body,
             {
@@ -280,10 +354,11 @@ impl Compiler {
         Ok(name)
     }
 
-    fn compile_operators(&mut self) {
+    fn compile_operators(&mut self, path: &Path) {
         // Compile an instruction sequence for each operator so they can be used as first-class
         // functions.
         self.compile_func(
+            path,
             "+",
             &Expr::Func {
                 loc: (0, 0),
@@ -300,6 +375,7 @@ impl Compiler {
         )
         .unwrap();
         self.compile_func(
+            path,
             "-",
             &Expr::Func {
                 loc: (0, 0),
@@ -316,6 +392,7 @@ impl Compiler {
         )
         .unwrap();
         self.compile_func(
+            path,
             "*",
             &Expr::Func {
                 loc: (0, 0),
@@ -332,6 +409,7 @@ impl Compiler {
         )
         .unwrap();
         self.compile_func(
+            path,
             "<",
             &Expr::Func {
                 loc: (0, 0),
@@ -348,6 +426,7 @@ impl Compiler {
         )
         .unwrap();
         self.compile_func(
+            path,
             "==",
             &Expr::Func {
                 loc: (0, 0),

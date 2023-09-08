@@ -112,6 +112,10 @@ impl Vm {
                     ip += 1;
                 }
                 Instruction::PushGlobal(v) => {
+                    if self.functions.get(v).is_none() {
+                        dbg!(&self.functions);
+                        dbg!(&v);
+                    }
                     let (func_block_id, args) = self.functions.get(v).unwrap();
                     let val = Value::Func {
                         name: v.to_string(),

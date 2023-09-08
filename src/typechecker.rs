@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 
 use crate::ast::*;
 use crate::local_variables::LocalVariables;
@@ -32,7 +33,7 @@ pub enum Error {
         actual_type: Type,
     },
     DuplicateConstructor {
-        existing: (String, Loc, Type),
+        existing: (GlobalName, Loc, Type),
         duplicate: TypeConstructor,
     },
     CannotApplyNonFunction {
@@ -64,6 +65,10 @@ pub enum Error {
         loc: Loc,
         actual_type: Type,
     },
+    MissingImport {
+        loc: (usize, usize),
+        namespace: String,
+    },
 }
 
 impl HasLoc for Error {
@@ -85,6 +90,7 @@ impl HasLoc for Error {
             Error::MissingCasePattern { loc, .. } => *loc,
             Error::TupleUnexpectedNumberOfElements { loc, .. } => *loc,
             Error::ExpectedTupleType { loc, .. } => *loc,
+            Error::MissingImport { loc, .. } => *loc,
         }
     }
 }
@@ -194,6 +200,9 @@ impl std::fmt::Display for Error {
                     "expected this to have a tuple type, but its actual type is {actual_type}"
                 )
             }
+            Error::MissingImport { namespace, .. } => {
+                write!(f, "this file does not import {namespace}")
+            }
         }
     }
 }
@@ -211,59 +220,134 @@ enum VarState {
     Poly,
 }
 
+/// A name qualified by the path to the file that defines it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GlobalName {
+    Builtin(String),
+    Named(PathBuf, String),
+}
+
+impl GlobalName {
+    pub fn builtin(name: &str) -> Self {
+        Self::Builtin(name.to_string())
+    }
+
+    pub fn named(path: &Path, name: &str) -> Self {
+        Self::Named(path.to_path_buf(), name.to_string())
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Builtin(s) => s,
+            Self::Named(_, s) => s,
+        }
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Self::Builtin(_) => None,
+            Self::Named(p, _) => Some(p),
+        }
+    }
+}
+
+impl std::fmt::Display for GlobalName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Builtin(s) => write!(f, "{s}"),
+            Self::Named(path, s) => write!(f, "{}:{s}", path.display()),
+        }
+    }
+}
+
+/// Maps file paths to their imports, which is a map from import name to imported file path
+#[derive(Debug, Clone)]
+pub struct Imports {
+    inner: HashMap<PathBuf, HashMap<String, PathBuf>>,
+}
+
+impl Imports {
+    pub fn new() -> Self {
+        Self {
+            inner: HashMap::new(),
+        }
+    }
+
+    /// Lookup a name relative to the given path.
+    pub fn lookup(&self, path: &Path, ns: &Namespace, name: &str) -> Option<GlobalName> {
+        self.inner
+            .get(path)
+            .unwrap()
+            .get(ns.as_str())
+            .map(|import_path| GlobalName::named(import_path, name))
+    }
+
+    pub fn insert(&mut self, path: &Path, imports: HashMap<String, PathBuf>) {
+        self.inner.insert(path.to_path_buf(), imports);
+    }
+}
+
 pub struct Typechecker {
     // constructor name => (type name, location, constructor type)
-    constructors: HashMap<String, (String, Loc, Type)>,
+    constructors: HashMap<GlobalName, (GlobalName, Loc, Type)>,
     // type name => type parameters
-    types: HashMap<String, Vec<String>>,
-    functions: HashMap<String, (Loc, Type)>,
+    types: HashMap<GlobalName, Vec<String>>,
+    functions: HashMap<GlobalName, (Loc, Type)>,
+    pub imports: Imports,
 }
 
 impl Typechecker {
     pub fn new() -> Self {
         let mut types = HashMap::new();
         let mut constructors = HashMap::new();
-        types.insert("List".to_string(), vec!["a".to_string()]);
+        types.insert(GlobalName::builtin("List"), vec!["a".to_string()]);
 
-        types.insert("Bool".to_string(), vec![]);
+        types.insert(GlobalName::builtin("Bool"), vec![]);
         // Insert the constructors for Bool, which is a built-in type.
         // The locations are fake.
-        constructors.insert("True".to_string(), ("Bool".to_string(), (0, 0), Type::Bool));
         constructors.insert(
-            "False".to_string(),
-            ("Bool".to_string(), (0, 0), Type::Bool),
+            GlobalName::builtin("True"),
+            (GlobalName::builtin("Bool"), (0, 0), Type::Bool),
         );
+        constructors.insert(
+            GlobalName::builtin("False"),
+            (GlobalName::builtin("Bool"), (0, 0), Type::Bool),
+        );
+
         Self {
             constructors,
             types,
             functions: HashMap::new(),
+            imports: Imports::new(),
         }
     }
 
     pub fn register_type(
         &mut self,
+        path: &Path,
         name: &str,
         params: &Vec<String>,
         constructors: &[TypeConstructor],
         loc: Loc,
     ) -> Result<(), Error> {
+        let type_name = GlobalName::named(path, name);
+
         // Check that type name is not already in use
-        if self.types.contains_key(name) {
+        if self.types.contains_key(&type_name) {
             return Err(Error::TypeAlreadyDefined(loc, name.to_string()));
         }
 
         // Check that constructors are well-formed
-        self.types.insert(name.to_string(), params.to_owned());
+        self.types.insert(type_name.clone(), params.to_owned());
         for ctor in constructors {
             let ctor_type = make_constructor_type(&name, params, &ctor);
+            let ctor_name = GlobalName::named(path, &ctor.name);
             // Note: we don't check the type now.
             // That happens later, see `check_all_types`.
-            match self.constructors.get(&ctor.name.to_string()) {
+            match self.constructors.get(&ctor_name) {
                 None => {
-                    self.constructors.insert(
-                        ctor.name.to_string(),
-                        (name.to_string(), ctor.loc(), ctor_type),
-                    );
+                    self.constructors
+                        .insert(ctor_name, (type_name.clone(), ctor.loc(), ctor_type));
                 }
                 Some(existing_ctor) => {
                     return Err(Error::DuplicateConstructor {
@@ -278,6 +362,7 @@ impl Typechecker {
 
     pub fn register_func(
         &mut self,
+        path: &Path,
         name: &str,
         source_type: &SourceType,
         loc: Loc,
@@ -285,11 +370,17 @@ impl Typechecker {
         // TODO: Check that function name is not already in use
         // TODO: Check that type is well-formed
         let ty = Type::from_source_type(&source_type);
-        self.functions.insert(name.to_string(), (loc, ty));
+        self.functions
+            .insert(GlobalName::named(path, name), (loc, ty));
         Ok(())
     }
 
-    pub fn check_func(&self, func: &Expr, expected_type: &SourceType) -> Result<(), Error> {
+    pub fn check_func(
+        &self,
+        path: &Path,
+        func: &Expr,
+        expected_type: &SourceType,
+    ) -> Result<(), Error> {
         let mut type_variables = HashMap::new();
         let ty = Type::from_source_type(expected_type);
         // The type variables found here should NOT be unified with concrete types, as they
@@ -298,7 +389,7 @@ impl Typechecker {
         for var in ty.vars() {
             type_variables.insert(var, VarState::Poly);
         }
-        self.check_expr(&LocalVariables::new(), &mut type_variables, func, &ty)
+        self.check_expr(&LocalVariables::new(), &mut type_variables, path, func, &ty)
     }
 
     /// Generate fresh names for new type variables introduced in `ty`.
@@ -356,6 +447,7 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
+        path: &Path,
         expr: &Expr,
         expected_type: &Type,
     ) -> Result<(), Error> {
@@ -371,7 +463,7 @@ impl Typechecker {
                 self.assert_type_eq(type_variables, expected_type, &TYPE_CHAR, *loc)
             }
             Expr::Var(loc, v) => {
-                let ty = self.infer_var(local_variables, type_variables, v, *loc)?;
+                let ty = self.infer_var(local_variables, type_variables, path, v, *loc)?;
                 self.assert_type_eq(type_variables, expected_type, &ty, *loc)
             }
             Expr::Tuple { loc, elems } => match expected_type {
@@ -384,7 +476,7 @@ impl Typechecker {
                         });
                     }
                     for (e, t) in elems.iter().zip(expected_elem_types.iter()) {
-                        self.check_expr(local_variables, type_variables, e, t)?;
+                        self.check_expr(local_variables, type_variables, path, e, t)?;
                     }
                     Ok(())
                 }
@@ -397,7 +489,7 @@ impl Typechecker {
                     let mut new_vars = vec![];
                     for e in elems {
                         let var = self.make_fresh_var(type_variables);
-                        self.check_expr(local_variables, type_variables, e, &var)?;
+                        self.check_expr(local_variables, type_variables, path, e, &var)?;
                         new_vars.push(var);
                     }
                     let ty = Type::Tuple(new_vars);
@@ -411,11 +503,11 @@ impl Typechecker {
                 self.assert_type_eq(type_variables, expected_type, &list_type, *loc)?;
                 // Check that the list elements have type `a`
                 for elem in elems {
-                    self.check_expr(local_variables, type_variables, elem, &elem_type)?;
+                    self.check_expr(local_variables, type_variables, path, elem, &elem_type)?;
                 }
                 // If present, check that the tail has type `List a`
                 if let Some(tail) = tail {
-                    self.check_expr(local_variables, type_variables, tail, &list_type)?;
+                    self.check_expr(local_variables, type_variables, path, tail, &list_type)?;
                 }
                 Ok(())
             }
@@ -426,7 +518,7 @@ impl Typechecker {
                 ..
             } => {
                 // Infer the type of the target
-                let target_type = self.infer_expr(local_variables, type_variables, target)?;
+                let target_type = self.infer_expr(local_variables, type_variables, path, target)?;
 
                 // There must be at least one branch
                 if branches.is_empty() {
@@ -443,6 +535,7 @@ impl Typechecker {
                 self.check_match_expr(
                     local_variables,
                     type_variables,
+                    path,
                     branches,
                     &target_type,
                     &expected_type,
@@ -482,6 +575,7 @@ impl Typechecker {
                 self.check_expr(
                     &local_variables.extend(new_locals),
                     type_variables,
+                    path,
                     body,
                     &result_type,
                 )
@@ -490,7 +584,7 @@ impl Typechecker {
                 head, args, loc, ..
             } => {
                 // Infer type of head
-                let head_type = self.infer_expr(local_variables, type_variables, head)?;
+                let head_type = self.infer_expr(local_variables, type_variables, path, head)?;
 
                 // Check that head is a function type
                 let head_type = match head_type {
@@ -536,6 +630,7 @@ impl Typechecker {
                     Ordering::Equal | Ordering::Less => self.check_app_fewer_or_exact_args(
                         local_variables,
                         type_variables,
+                        path,
                         head_type_args,
                         head_type_result,
                         args,
@@ -545,6 +640,7 @@ impl Typechecker {
                     Ordering::Greater => self.check_app_more_args(
                         local_variables,
                         type_variables,
+                        path,
                         head_type_args,
                         head_type_result,
                         args,
@@ -575,6 +671,7 @@ impl Typechecker {
                         self.check_expr(
                             &local_variables.extend(new_locals.clone()),
                             type_variables,
+                            path,
                             &value,
                             &ty,
                         )?;
@@ -583,6 +680,7 @@ impl Typechecker {
                         self.infer_expr(
                             &local_variables.extend(new_locals.clone()),
                             type_variables,
+                            path,
                             &value,
                         )?
                     };
@@ -592,6 +690,7 @@ impl Typechecker {
                 self.check_expr(
                     &local_variables.extend(new_locals),
                     type_variables,
+                    path,
                     &body,
                     expected_type,
                 )
@@ -605,6 +704,7 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
+        path: &Path,
         head_type_args: VecDeque<&Type>,
         head_type_result: &Type,
         args: &[Expr],
@@ -618,6 +718,7 @@ impl Typechecker {
             self.check_expr(
                 local_variables,
                 type_variables,
+                path,
                 arg,
                 head_type_args.next().unwrap(),
             )?;
@@ -635,6 +736,7 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
+        path: &Path,
         head_type_args: VecDeque<&Type>,
         head_type_result: &Type,
         args: &[Expr],
@@ -656,7 +758,7 @@ impl Typechecker {
         for type_arg in head_type_args.iter() {
             match args.next() {
                 Some(arg) => {
-                    self.check_expr(local_variables, type_variables, arg, type_arg)?;
+                    self.check_expr(local_variables, type_variables, path, arg, type_arg)?;
                     last_arg_loc = Some(arg.loc());
                 }
                 None => {
@@ -668,7 +770,12 @@ impl Typechecker {
         // Now args holds the remaining args. We must infer each one.
         let mut remaining_arg_types = vec![];
         for arg in args {
-            remaining_arg_types.push(self.infer_expr(local_variables, type_variables, arg)?);
+            remaining_arg_types.push(self.infer_expr(
+                local_variables,
+                type_variables,
+                path,
+                arg,
+            )?);
         }
 
         // We're checking that the return type of the function matches the type
@@ -716,17 +823,18 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
+        path: &Path,
         expr: &Expr,
     ) -> Result<Type, Error> {
         match expr {
             Expr::Int(_, _) => Ok(TYPE_INT),
             Expr::Str(_, _) => Ok(TYPE_STRING),
             Expr::Char(_, _) => Ok(TYPE_STRING),
-            Expr::Var(loc, v) => self.infer_var(local_variables, type_variables, v, *loc),
+            Expr::Var(loc, v) => self.infer_var(local_variables, type_variables, path, v, *loc),
             Expr::Tuple { elems, .. } => {
                 let mut elem_types = vec![];
                 for e in elems {
-                    elem_types.push(self.infer_expr(local_variables, type_variables, e)?);
+                    elem_types.push(self.infer_expr(local_variables, type_variables, path, e)?);
                 }
                 Ok(Type::Tuple(elem_types))
             }
@@ -737,21 +845,33 @@ impl Typechecker {
                         let list_type = self.make_fresh_list_type(type_variables);
                         // If present, check the tail
                         if let Some(tail) = tail {
-                            self.check_expr(local_variables, type_variables, tail, &list_type)?;
+                            self.check_expr(
+                                local_variables,
+                                type_variables,
+                                path,
+                                tail,
+                                &list_type,
+                            )?;
                         }
                         Ok(list_type)
                     }
                     Some((first, rest)) => {
                         // Infer the first element
                         // Check that the remaining elements have the same type
-                        let ty = self.infer_expr(local_variables, type_variables, first)?;
+                        let ty = self.infer_expr(local_variables, type_variables, path, first)?;
                         for elem in rest {
-                            self.check_expr(local_variables, type_variables, elem, &ty)?;
+                            self.check_expr(local_variables, type_variables, path, elem, &ty)?;
                         }
                         // If it exists, check that the tail has the type `List a`
                         let list_type = self.make_list_type(ty);
                         if let Some(tail) = tail {
-                            self.check_expr(local_variables, type_variables, tail, &list_type)?;
+                            self.check_expr(
+                                local_variables,
+                                type_variables,
+                                path,
+                                tail,
+                                &list_type,
+                            )?;
                         }
                         Ok(list_type)
                     }
@@ -764,7 +884,7 @@ impl Typechecker {
                 ..
             } => {
                 // Infer the type of the target
-                let target_type = self.infer_expr(local_variables, type_variables, target)?;
+                let target_type = self.infer_expr(local_variables, type_variables, path, target)?;
 
                 // There must be at least one branch
                 if branches.is_empty() {
@@ -782,6 +902,7 @@ impl Typechecker {
                 let result_type = self.infer_match_branch(
                     local_variables,
                     type_variables,
+                    path,
                     &target_type,
                     &branches[0],
                 )?;
@@ -789,6 +910,7 @@ impl Typechecker {
                 self.check_match_expr(
                     local_variables,
                     type_variables,
+                    path,
                     branches,
                     &target_type,
                     &result_type,
@@ -801,7 +923,7 @@ impl Typechecker {
                 head, args, loc, ..
             } => {
                 // Infer the type of the function
-                let head_ty = self.infer_expr(local_variables, type_variables, &head)?;
+                let head_ty = self.infer_expr(local_variables, type_variables, path, &head)?;
 
                 // Deconstruct the function type
                 match head_ty {
@@ -816,6 +938,7 @@ impl Typechecker {
                                     self.check_expr(
                                         local_variables,
                                         type_variables,
+                                        path,
                                         arg,
                                         arg_type,
                                     )?;
@@ -844,12 +967,18 @@ impl Typechecker {
                     let ty = self.infer_expr(
                         &local_variables.extend(new_locals.clone()),
                         type_variables,
+                        path,
                         &value,
                     )?;
                     new_locals.insert(name.to_string(), ty);
                 }
                 // Infer the body
-                self.infer_expr(&local_variables.extend(new_locals), type_variables, &body)
+                self.infer_expr(
+                    &local_variables.extend(new_locals),
+                    type_variables,
+                    path,
+                    &body,
+                )
             }
         }
     }
@@ -858,16 +987,27 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
+        path: &Path,
         branches: &Vec<CaseBranch>,
         target_type: &Type,
         result_type: &Type,
     ) -> Result<(), Error> {
         // For each branch...
         for branch in branches {
-            let new_vars =
-                self.check_match_branch_pattern(type_variables, &branch.pattern, target_type)?;
+            let new_vars = self.check_match_branch_pattern(
+                type_variables,
+                path,
+                &branch.pattern,
+                target_type,
+            )?;
             let local_variables = local_variables.extend(new_vars);
-            self.check_expr(&local_variables, type_variables, &branch.rhs, result_type)?;
+            self.check_expr(
+                &local_variables,
+                type_variables,
+                path,
+                &branch.rhs,
+                result_type,
+            )?;
         }
 
         Ok(())
@@ -878,6 +1018,7 @@ impl Typechecker {
     fn check_match_branch_pattern(
         &self,
         type_variables: &mut TypeVariables,
+        path: &Path,
         pattern: &Pattern,
         expected_type: &Type,
     ) -> Result<HashMap<String, Type>, Error> {
@@ -902,12 +1043,18 @@ impl Typechecker {
 
                 // Check that each pattern has type a
                 for e in elems {
-                    new_vars.extend(self.check_match_branch_pattern(type_variables, e, &var)?);
+                    new_vars.extend(self.check_match_branch_pattern(
+                        type_variables,
+                        path,
+                        e,
+                        &var,
+                    )?);
                 }
                 // Check that the tail, if present, has type List a
                 if let Some(tail) = tail {
                     new_vars.extend(self.check_match_branch_pattern(
                         type_variables,
+                        path,
                         tail,
                         &list_type,
                     )?);
@@ -918,7 +1065,12 @@ impl Typechecker {
                 let mut ty_vars = vec![];
                 for p in elems {
                     let var = self.make_fresh_var(type_variables);
-                    new_vars.extend(self.check_match_branch_pattern(type_variables, p, &var)?);
+                    new_vars.extend(self.check_match_branch_pattern(
+                        type_variables,
+                        path,
+                        p,
+                        &var,
+                    )?);
                     ty_vars.push(var);
                 }
                 let tuple_type = Type::Tuple(ty_vars.clone());
@@ -930,7 +1082,14 @@ impl Typechecker {
             } => {
                 // Check the constructor result type matches `expected_type`
                 let ctor_ty = {
-                    let ty = self.lookup_constructor(type_variables, name, *loc)?;
+                    // We currently assume that the constructor is defined in the same file (or is
+                    // a builtin)
+                    let ctor_name = match name.as_str() {
+                        "True" | "False" => GlobalName::builtin(name),
+                        _ => GlobalName::named(path, name),
+                    };
+
+                    let ty = self.lookup_constructor(type_variables, &ctor_name, *loc)?;
 
                     // func_args always returns a non-empty vector, so this unwrap is safe
                     let ctor_result_type = *ty.func_args().back().unwrap();
@@ -952,7 +1111,8 @@ impl Typechecker {
 
                 // Add each pattern to the set of local variables
                 for (pattern, ty) in args.iter().zip(ctor_ty_args.into_iter()) {
-                    let vars = self.check_match_branch_pattern(type_variables, &pattern, &ty)?;
+                    let vars =
+                        self.check_match_branch_pattern(type_variables, path, &pattern, &ty)?;
                     new_vars.extend(vars);
                 }
             }
@@ -1043,8 +1203,9 @@ impl Typechecker {
                 let mut all_constructors: HashSet<&str> = self
                     .constructors
                     .iter()
-                    .filter(|(_, (t, _, _))| t == type_name)
-                    .map(|(n, _)| n.as_str())
+                    // TODO: path is not taken into account here
+                    .filter(|(_, (t, _, _))| t.name() == type_name)
+                    .map(|(n, _)| n.name())
                     .collect();
 
                 for p in branch_patterns {
@@ -1080,12 +1241,48 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
+        path: &Path,
         var: &Var,
         loc: Loc,
     ) -> Result<Type, Error> {
         match var {
-            Var::Local(s) => self.lookup(local_variables, type_variables, s, loc),
-            Var::Constructor(s) => self.lookup_constructor(type_variables, s, loc),
+            Var::Local(s) => self.lookup_local(local_variables, type_variables, path, s, loc),
+            Var::Global(ns, s) => {
+                let name = match ns {
+                    Some(namespace) => {
+                        // Look up the path for the namespace
+                        // Construct a GlobalName
+                        // Lookup the name
+                        self.imports
+                            .lookup(path, namespace, s)
+                            .ok_or(Error::MissingImport {
+                                loc,
+                                namespace: namespace.to_string(),
+                            })
+                    }
+                    None => {
+                        // Assume the global is defined in this file
+                        Ok(GlobalName::named(path, s))
+                    }
+                }?;
+                self.lookup_global(type_variables, &name, loc)
+            }
+            Var::Constructor(ns, s) => {
+                let ctor_name = match ns {
+                    Some(ns) => self
+                        .imports
+                        .lookup(path, ns, s)
+                        .ok_or(Error::MissingImport {
+                            loc,
+                            namespace: ns.to_string(),
+                        }),
+                    None => Ok(match s.as_str() {
+                        "True" | "False" => GlobalName::builtin(s),
+                        _ => GlobalName::named(path, s),
+                    }),
+                }?;
+                self.lookup_constructor(type_variables, &ctor_name, loc)
+            }
             Var::Operator(op) => match op {
                 Operator::Add | Operator::Sub | Operator::Mul => Ok(Type::Func(
                     Box::new(Type::Int),
@@ -1118,6 +1315,7 @@ impl Typechecker {
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
+        path: &Path,
         target_type: &Type,
         branch: &CaseBranch,
     ) -> Result<Type, Error> {
@@ -1125,10 +1323,10 @@ impl Typechecker {
             Pattern::Int { loc, .. } => {
                 // The target type must be Int
                 self.assert_type_eq(type_variables, &target_type, &Type::Int, *loc)?;
-                self.infer_expr(local_variables, type_variables, &branch.rhs)
+                self.infer_expr(local_variables, type_variables, path, &branch.rhs)
             }
             Pattern::Wildcard { .. } => {
-                self.infer_expr(local_variables, type_variables, &branch.rhs)
+                self.infer_expr(local_variables, type_variables, path, &branch.rhs)
             }
             Pattern::Var { .. } => todo!(),
             Pattern::ListNil { loc, .. } => {
@@ -1136,22 +1334,19 @@ impl Typechecker {
                 let var = self.make_fresh_var(type_variables);
                 let list_type = self.make_list_type(var);
                 self.assert_type_eq(type_variables, &target_type, &list_type, *loc)?;
-                self.infer_expr(local_variables, type_variables, &branch.rhs)
+                self.infer_expr(local_variables, type_variables, path, &branch.rhs)
             }
             Pattern::ListCons { .. } => {
                 todo!()
             }
-            Pattern::Constructor { name, args, .. } => {
+            Pattern::Constructor {
+                name, args, loc, ..
+            } => {
                 // Lookup the type of the constructor and check it matches the target type.
-                let ctor_ty = match self.constructors.get(name) {
-                    None => {
-                        return Err(Error::UnknownConstructor(branch.loc(), name.to_string()));
-                    }
-                    Some((_, loc, ty)) => {
-                        self.assert_type_eq(type_variables, &target_type, &ty, *loc)?;
-                        ty
-                    }
-                };
+                // Assume the type is defined in this file
+                let ctor_name = GlobalName::named(path, name);
+                let ctor_ty = self.lookup_constructor(type_variables, &ctor_name, *loc)?;
+                self.assert_type_eq(type_variables, &target_type, &ctor_ty, *loc)?;
 
                 // Check the constructor has the right number of args
                 let ctor_ty_args = ctor_ty.func_args();
@@ -1178,7 +1373,7 @@ impl Typechecker {
                 let local_variables = local_variables.extend(new_vars);
 
                 // Infer the rhs
-                self.infer_expr(&local_variables, type_variables, &branch.rhs)
+                self.infer_expr(&local_variables, type_variables, path, &branch.rhs)
             }
             Pattern::Tuple { elems, loc } => {
                 // The target type must be a tuple type with the same number of elements
@@ -1189,6 +1384,7 @@ impl Typechecker {
                     // Check each subpattern, and collect any bound variables
                     new_locals.extend(self.check_match_branch_pattern(
                         type_variables,
+                        path,
                         pattern,
                         &var,
                     )?);
@@ -1199,38 +1395,55 @@ impl Typechecker {
 
                 // Infer the rhs
                 let local_variables = local_variables.extend(new_locals);
-                self.infer_expr(&local_variables, type_variables, &branch.rhs)
+                self.infer_expr(&local_variables, type_variables, path, &branch.rhs)
             }
         }
     }
 
-    fn lookup(
+    fn lookup_global(
+        &self,
+        type_variables: &mut TypeVariables,
+        name: &GlobalName,
+        loc: Loc,
+    ) -> Result<Type, Error> {
+        match self.functions.get(&name) {
+            Some((_, ty)) => {
+                // This function type may have type variables that we must instantiate.
+                let (ty, vars) = self.generate_fresh_type_variables(ty.clone(), type_variables);
+                for var in vars {
+                    type_variables.insert(var, VarState::Unsolved);
+                }
+                Ok(ty.clone())
+            }
+            None => Err(Error::UnknownVariable(loc, name.to_string())),
+        }
+    }
+
+    fn lookup_local(
         &self,
         local_variables: &LocalVariables<Type>,
         type_variables: &mut TypeVariables,
+        path: &Path,
         name: &str,
         loc: Loc,
     ) -> Result<Type, Error> {
+        // First look in the local variables
         match local_variables.lookup(name) {
             Some(ty) => Ok(ty.clone()),
-            None => match self.functions.get(name) {
-                Some((_, ty)) => {
-                    // This function type may have type variables that we must instantiate.
-                    let (ty, vars) = self.generate_fresh_type_variables(ty.clone(), type_variables);
-                    for var in vars {
-                        type_variables.insert(var, VarState::Unsolved);
-                    }
-                    Ok(ty.clone())
+            None => {
+                // Then look at top-level bindings in the current file
+                match self.lookup_global(type_variables, &GlobalName::named(path, name), loc) {
+                    Ok(ty) => Ok(ty.clone()),
+                    Err(_) => Err(Error::UnknownVariable(loc, name.to_string())),
                 }
-                None => Err(Error::UnknownVariable(loc, name.to_string())),
-            },
+            }
         }
     }
 
     fn lookup_constructor(
         &self,
         type_variables: &mut TypeVariables,
-        name: &str,
+        name: &GlobalName,
         loc: Loc,
     ) -> Result<Type, Error> {
         match self.constructors.get(name) {
@@ -1516,40 +1729,56 @@ impl Typechecker {
     /// If we check each type up-front, we have to register them in reverse dependency order.
     pub fn check_all_types(&self) -> Result<(), Error> {
         for (type_name, loc, ctor_type) in self.constructors.values() {
-            match self.types.get(type_name) {
-                Some(type_params) => {
-                    self.check_type(ctor_type, *loc, type_params)?;
+            match type_name {
+                GlobalName::Builtin(_) => {
+                    // No need to check builtin types.
                 }
-                None => {
-                    return Err(Error::UnknownType(*loc, type_name.to_string()));
-                }
+                GlobalName::Named(path, _) => match self.types.get(type_name) {
+                    Some(type_params) => {
+                        self.check_type(path, ctor_type, *loc, type_params)?;
+                    }
+                    None => {
+                        return Err(Error::UnknownType(*loc, type_name.to_string()));
+                    }
+                },
             }
         }
         Ok(())
     }
 
-    pub fn check_type(&self, ty: &Type, loc: Loc, vars_in_scope: &[String]) -> Result<(), Error> {
+    pub fn check_type(
+        &self,
+        path: &Path,
+        ty: &Type,
+        loc: Loc,
+        vars_in_scope: &[String],
+    ) -> Result<(), Error> {
         // Check that all mentioned types exist.
         match ty {
             Type::Named(n) => {
-                if !self.types.contains_key(n) {
+                // Assume the type is defined locally
+                let name = match n.as_str() {
+                    "List" | "Bool" => GlobalName::builtin(n),
+                    _ => GlobalName::named(path, n),
+                };
+                if !self.types.contains_key(&name) {
                     return Err(Error::UnknownType(loc, n.to_string()));
                 }
             }
             Type::Func(f, x) => {
-                self.check_type(f, loc, vars_in_scope)?;
-                self.check_type(x, loc, vars_in_scope)?;
+                self.check_type(path, f, loc, vars_in_scope)?;
+                self.check_type(path, x, loc, vars_in_scope)?;
             }
             Type::Int | Type::Bool | Type::Str | Type::Char => {}
             Type::Tuple(elems) => {
                 for e in elems {
-                    self.check_type(e, loc, vars_in_scope)?;
+                    self.check_type(path, e, loc, vars_in_scope)?;
                 }
             }
             Type::App { head, args } => {
-                self.check_type(head, loc, vars_in_scope)?;
+                self.check_type(path, head, loc, vars_in_scope)?;
                 for arg in args {
-                    self.check_type(arg, loc, vars_in_scope)?;
+                    self.check_type(path, arg, loc, vars_in_scope)?;
                 }
             }
             Type::Var(v) => {
