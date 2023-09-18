@@ -365,23 +365,63 @@ impl Parser {
     // (Bool -> Bool)
     // (Foo Bar)
     // (Foo -> Bar Baz)
+    // some_import.Foo
     fn parse_type_nested(&mut self) -> Result<SourceType, Error> {
         if self.input().starts_with("(") {
             return self.parse_tuple_or_parenthesised_type();
         } else {
             let loc = self.loc;
-            if self.input().starts_with(upper_ident_char) {
-                let type_name = self.parse_upper_ident()?;
+
+            // A leading underscore could be part of a namespace or a type.
+            // Start by parsing all leading underscores, the add them on to the result of the next
+            // parse.
+            let mut leading_underscores = 0;
+            while self.input().starts_with('_') {
+                self.eat("_")?;
+                leading_underscores += 1;
+            }
+
+            if self.input().starts_with(lower_ident_char) {
+                let namespace_or_type_var = self.parse_lower_ident()?;
+                let r = format!("{}{namespace_or_type_var}", "_".repeat(leading_underscores));
+                leading_underscores = 0;
+
+                // If the next char is ".", we have parsed a namespace.
+                // Otherwise we've parsed a type variable.
+                if self.input().starts_with(".") {
+                    self.eat(".")?;
+
+                    while self.input().starts_with('_') {
+                        self.eat("_")?;
+                        leading_underscores += 1;
+                    }
+
+                    let type_name = format!(
+                        "{}{}",
+                        "_".repeat(leading_underscores),
+                        self.parse_upper_ident()?
+                    );
+                    Ok(SourceType::Named(
+                        (loc, self.loc),
+                        Some(r.into()),
+                        type_name,
+                    ))
+                } else {
+                    Ok(SourceType::Var((loc, self.loc), r))
+                }
+            } else {
+                let type_name = format!(
+                    "{}{}",
+                    "_".repeat(leading_underscores),
+                    self.parse_upper_ident()?
+                );
                 Ok(match type_name.as_str() {
                     "Int" => SourceType::Int((loc, self.loc)),
                     "Bool" => SourceType::Bool((loc, self.loc)),
                     "String" => SourceType::Str((loc, self.loc)),
                     "Char" => SourceType::Char((loc, self.loc)),
-                    _ => SourceType::Named((loc, self.loc), type_name),
+                    _ => SourceType::Named((loc, self.loc), None, type_name),
                 })
-            } else {
-                let type_var = self.parse_lower_ident()?;
-                Ok(SourceType::Var((loc, self.loc), type_var))
             }
         }
     }
@@ -863,10 +903,24 @@ impl Parser {
                     loc: (loc, self.loc),
                 });
             } else {
-                return Ok(Pattern::Var {
-                    loc: (loc, self.loc),
-                    name,
-                });
+                if self.input().starts_with(".") {
+                    // We're parsing a namespaced constructor
+                    self.eat(".")?;
+                    let namespace = Some(name.into());
+                    let name = self.parse_upper_ident()?;
+                    self.trim();
+                    return Ok(Pattern::Constructor {
+                        loc: (loc, self.loc),
+                        namespace,
+                        name,
+                        args: vec![],
+                    });
+                } else {
+                    return Ok(Pattern::Var {
+                        loc: (loc, self.loc),
+                        name,
+                    });
+                }
             }
         }
 
@@ -943,6 +997,7 @@ impl Parser {
         }
         Ok(Pattern::Constructor {
             loc: (loc, self.loc),
+            namespace: None,
             name,
             args,
         })
@@ -965,10 +1020,24 @@ impl Parser {
                     loc: (loc, self.loc),
                 });
             } else {
-                return Ok(Pattern::Var {
-                    loc: (loc, self.loc),
-                    name,
-                });
+                if self.input().starts_with(".") {
+                    // We're parsing a namespaced constructor
+                    self.eat(".")?;
+                    let namespace = Some(name.into());
+                    let name = self.parse_upper_ident()?;
+                    self.trim();
+                    return Ok(Pattern::Constructor {
+                        loc: (loc, self.loc),
+                        namespace,
+                        name,
+                        args: vec![],
+                    });
+                } else {
+                    return Ok(Pattern::Var {
+                        loc: (loc, self.loc),
+                        name,
+                    });
+                }
             }
         }
         if self.input().starts_with("(") {
@@ -985,6 +1054,7 @@ impl Parser {
         self.trim();
         Ok(Pattern::Constructor {
             loc: (loc, self.loc),
+            namespace: None,
             name,
             args: vec![],
         })

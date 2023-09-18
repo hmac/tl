@@ -3,8 +3,8 @@ use std::{collections::HashMap, path::Path};
 use tracing::debug;
 
 use crate::{
-    ast::{Expr, Loc, Operator, Pattern, Var},
-    typechecker::{GlobalName, Imports},
+    ast::{Expr, GlobalName, Loc, Operator, Pattern, Var},
+    typechecker::Imports,
 };
 
 /// Compiles expressions to VM instructions
@@ -263,10 +263,7 @@ impl Compiler {
                         if is_leaf && v == func_name {
                             ins.push(Instruction::TailCall);
                         } else {
-                            let name = match ns {
-                                Some(ns) => self.imports.lookup(path, ns, v).unwrap(),
-                                None => GlobalName::named(path, v),
-                            };
+                            let name = self.imports.lookup((0, 0), path, ns, v).unwrap();
                             ins.push(Instruction::PushGlobal(name.to_string()));
                             ins.push(Instruction::Call);
                         }

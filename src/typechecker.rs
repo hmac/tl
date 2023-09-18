@@ -220,46 +220,6 @@ enum VarState {
     Poly,
 }
 
-/// A name qualified by the path to the file that defines it.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum GlobalName {
-    Builtin(String),
-    Named(PathBuf, String),
-}
-
-impl GlobalName {
-    pub fn builtin(name: &str) -> Self {
-        Self::Builtin(name.to_string())
-    }
-
-    pub fn named(path: &Path, name: &str) -> Self {
-        Self::Named(path.to_path_buf(), name.to_string())
-    }
-
-    pub fn name(&self) -> &str {
-        match self {
-            Self::Builtin(s) => s,
-            Self::Named(_, s) => s,
-        }
-    }
-
-    pub fn path(&self) -> Option<&Path> {
-        match self {
-            Self::Builtin(_) => None,
-            Self::Named(p, _) => Some(p),
-        }
-    }
-}
-
-impl std::fmt::Display for GlobalName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Builtin(s) => write!(f, "{s}"),
-            Self::Named(path, s) => write!(f, "{}:{s}", path.display()),
-        }
-    }
-}
-
 /// Maps file paths to their imports, which is a map from import name to imported file path
 #[derive(Debug, Clone)]
 pub struct Imports {
@@ -274,12 +234,27 @@ impl Imports {
     }
 
     /// Lookup a name relative to the given path.
-    pub fn lookup(&self, path: &Path, ns: &Namespace, name: &str) -> Option<GlobalName> {
-        self.inner
-            .get(path)
-            .unwrap()
-            .get(ns.as_str())
-            .map(|import_path| GlobalName::named(import_path, name))
+    /// If namespace is `None`, assume the name is relative to the current module.
+    pub fn lookup(
+        &self,
+        loc: Loc,
+        path: &Path,
+        ns: &Option<Namespace>,
+        name: &str,
+    ) -> Result<GlobalName, Error> {
+        match ns {
+            None => Ok(GlobalName::named(path, name)),
+            Some(ns) => self
+                .inner
+                .get(path)
+                .unwrap()
+                .get(ns.as_str())
+                .map(|import_path| GlobalName::named(import_path, name))
+                .ok_or(Error::MissingImport {
+                    loc,
+                    namespace: ns.to_string(),
+                }),
+        }
     }
 
     pub fn insert(&mut self, path: &Path, imports: HashMap<String, PathBuf>) {
@@ -340,7 +315,7 @@ impl Typechecker {
         // Check that constructors are well-formed
         self.types.insert(type_name.clone(), params.to_owned());
         for ctor in constructors {
-            let ctor_type = make_constructor_type(&name, params, &ctor);
+            let ctor_type = self.make_constructor_type(loc, path, None, &name, params, &ctor)?;
             let ctor_name = GlobalName::named(path, &ctor.name);
             // Note: we don't check the type now.
             // That happens later, see `check_all_types`.
@@ -369,7 +344,8 @@ impl Typechecker {
     ) -> Result<(), Error> {
         // TODO: Check that function name is not already in use
         // TODO: Check that type is well-formed
-        let ty = Type::from_source_type(&source_type);
+        let ty = self.type_from_source_type(path, &source_type)?;
+        self.check_type(path, &ty, loc, &ty.vars())?;
         self.functions
             .insert(GlobalName::named(path, name), (loc, ty));
         Ok(())
@@ -382,7 +358,7 @@ impl Typechecker {
         expected_type: &SourceType,
     ) -> Result<(), Error> {
         let mut type_variables = HashMap::new();
-        let ty = Type::from_source_type(expected_type);
+        let ty = self.type_from_source_type(path, expected_type)?;
         // The type variables found here should NOT be unified with concrete types, as they
         // are part of the function's signature and so should remain polymorphic.
         // We indicate this by setting their VarState to Poly.
@@ -661,7 +637,7 @@ impl Typechecker {
                 } in bindings
                 {
                     let ty = if let Some(source_type) = r#type {
-                        let ty = Type::from_source_type(&source_type);
+                        let ty = self.type_from_source_type(path, &source_type)?;
                         // Type variables in let bindings are treated similarly to those in
                         // function signatures: they should not be unified.
                         for var in ty.vars() {
@@ -1078,7 +1054,11 @@ impl Typechecker {
             }
             Pattern::Wildcard { .. } => {}
             Pattern::Constructor {
-                name, args, loc, ..
+                namespace,
+                name,
+                args,
+                loc,
+                ..
             } => {
                 // Check the constructor result type matches `expected_type`
                 let ctor_ty = {
@@ -1086,7 +1066,7 @@ impl Typechecker {
                     // a builtin)
                     let ctor_name = match name.as_str() {
                         "True" | "False" => GlobalName::builtin(name),
-                        _ => GlobalName::named(path, name),
+                        _ => self.imports.lookup(*loc, path, namespace, name)?,
                     };
 
                     let ty = self.lookup_constructor(type_variables, &ctor_name, *loc)?;
@@ -1173,7 +1153,7 @@ impl Typechecker {
                     loop {
                         match t {
                             Type::Named(name) => {
-                                n = Some(name);
+                                n = name;
                                 break;
                             }
                             Type::App { head, .. } => {
@@ -1194,17 +1174,16 @@ impl Typechecker {
                             _ => unreachable!("{:?}", t),
                         }
                     }
-                    n.unwrap()
+                    n
                 };
                 // We don't handle lists yet
-                if type_name == "List" {
+                if *type_name == GlobalName::builtin("List") {
                     return Ok(());
                 }
                 let mut all_constructors: HashSet<&str> = self
                     .constructors
                     .iter()
-                    // TODO: path is not taken into account here
-                    .filter(|(_, (t, _, _))| t.name() == type_name)
+                    .filter(|(_, (t, _, _))| t == type_name)
                     .map(|(n, _)| n.name())
                     .collect();
 
@@ -1248,39 +1227,14 @@ impl Typechecker {
         match var {
             Var::Local(s) => self.lookup_local(local_variables, type_variables, path, s, loc),
             Var::Global(ns, s) => {
-                let name = match ns {
-                    Some(namespace) => {
-                        // Look up the path for the namespace
-                        // Construct a GlobalName
-                        // Lookup the name
-                        self.imports
-                            .lookup(path, namespace, s)
-                            .ok_or(Error::MissingImport {
-                                loc,
-                                namespace: namespace.to_string(),
-                            })
-                    }
-                    None => {
-                        // Assume the global is defined in this file
-                        Ok(GlobalName::named(path, s))
-                    }
-                }?;
+                let name = self.imports.lookup(loc, path, ns, s)?;
                 self.lookup_global(type_variables, &name, loc)
             }
             Var::Constructor(ns, s) => {
-                let ctor_name = match ns {
-                    Some(ns) => self
-                        .imports
-                        .lookup(path, ns, s)
-                        .ok_or(Error::MissingImport {
-                            loc,
-                            namespace: ns.to_string(),
-                        }),
-                    None => Ok(match s.as_str() {
-                        "True" | "False" => GlobalName::builtin(s),
-                        _ => GlobalName::named(path, s),
-                    }),
-                }?;
+                let ctor_name = match s.as_str() {
+                    "True" | "False" => GlobalName::builtin(s),
+                    _ => self.imports.lookup(loc, path, ns, s)?,
+                };
                 self.lookup_constructor(type_variables, &ctor_name, loc)
             }
             Var::Operator(op) => match op {
@@ -1755,14 +1709,9 @@ impl Typechecker {
     ) -> Result<(), Error> {
         // Check that all mentioned types exist.
         match ty {
-            Type::Named(n) => {
-                // Assume the type is defined locally
-                let name = match n.as_str() {
-                    "List" | "Bool" => GlobalName::builtin(n),
-                    _ => GlobalName::named(path, n),
-                };
+            Type::Named(name) => {
                 if !self.types.contains_key(&name) {
-                    return Err(Error::UnknownType(loc, n.to_string()));
+                    return Err(Error::UnknownType(loc, name.to_string()));
                 }
             }
             Type::Func(f, x) => {
@@ -1801,7 +1750,7 @@ impl Typechecker {
 
     fn make_list_type(&self, elem_type: Type) -> Type {
         Type::App {
-            head: Box::new(Type::Named("List".to_string())),
+            head: Box::new(Type::Named(GlobalName::builtin("List"))),
             args: vec![elem_type],
         }
     }
@@ -1809,31 +1758,75 @@ impl Typechecker {
     fn make_fresh_list_type(&self, type_variables: &mut TypeVariables) -> Type {
         self.make_list_type(self.make_fresh_var(type_variables))
     }
-}
 
-fn make_constructor_type(
-    type_name: &str,
-    params: &Vec<String>,
-    constructor: &TypeConstructor,
-) -> Type {
-    // Create a function type with the constructor's type as the result
-    // e.g.
-    // type Foo { MkFoo Int Bool Char }
-    // has type
-    // MkFoo : Int -> Bool -> Char -> Foo
-
-    let mut ty = Type::Named(type_name.to_string());
-
-    if !params.is_empty() {
-        let args = params.iter().map(|p| Type::Var(p.to_string())).collect();
-        ty = Type::App {
-            head: Box::new(ty),
-            args,
-        };
+    fn type_from_source_type(&self, path: &Path, source_type: &SourceType) -> Result<Type, Error> {
+        match source_type {
+            SourceType::Named(_, None, n) if n == "List" => {
+                Ok(Type::Named(GlobalName::builtin("List")))
+            }
+            SourceType::Named(loc, ns, n) => {
+                self.imports.lookup(*loc, path, ns, n).map(Type::Named)
+            }
+            SourceType::Func(_, f, x) => {
+                let f = self.type_from_source_type(path, f)?;
+                let x = self.type_from_source_type(path, x)?;
+                Ok(Type::Func(Box::new(f), Box::new(x)))
+            }
+            SourceType::Int(_) => Ok(Type::Int),
+            SourceType::Bool(_) => Ok(Type::Bool),
+            SourceType::Str(_) => Ok(Type::Str),
+            SourceType::Char(_) => Ok(Type::Char),
+            SourceType::App { head, args, .. } => {
+                let head = self.type_from_source_type(path, head)?;
+                let args = args
+                    .iter()
+                    .map(|arg| self.type_from_source_type(path, arg))
+                    .collect::<Result<_, _>>()?;
+                Ok(Type::App {
+                    head: Box::new(head),
+                    args,
+                })
+            }
+            SourceType::Var(_, v) => Ok(Type::Var(v.to_string())),
+            SourceType::Tuple { elems, .. } => Ok(Type::Tuple(
+                elems
+                    .into_iter()
+                    .map(|e| self.type_from_source_type(path, e))
+                    .collect::<Result<_, _>>()?,
+            )),
+        }
     }
+    fn make_constructor_type(
+        &self,
+        loc: Loc,
+        path: &Path,
+        namespace: Option<Namespace>,
+        type_name: &str,
+        params: &Vec<String>,
+        constructor: &TypeConstructor,
+    ) -> Result<Type, Error> {
+        // Create a function type with the constructor's type as the result
+        // e.g.
+        // type Foo { MkFoo Int Bool Char }
+        // has type
+        // MkFoo : Int -> Bool -> Char -> Foo
 
-    for a in constructor.arguments.iter().rev().cloned() {
-        ty = Type::Func(Box::new(Type::from_source_type(&a)), Box::new(ty));
+        let mut ty = Type::Named(self.imports.lookup(loc, path, &namespace, type_name)?);
+
+        if !params.is_empty() {
+            let args = params.iter().map(|p| Type::Var(p.to_string())).collect();
+            ty = Type::App {
+                head: Box::new(ty),
+                args,
+            };
+        }
+
+        for a in constructor.arguments.iter().rev().cloned() {
+            ty = Type::Func(
+                Box::new(self.type_from_source_type(path, &a)?),
+                Box::new(ty),
+            );
+        }
+        Ok(ty)
     }
-    ty
 }

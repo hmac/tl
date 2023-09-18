@@ -11,9 +11,9 @@ use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use ast::{Decl, HasLoc, Loc};
+use ast::{Decl, GlobalName, HasLoc, Loc};
 use tracing::debug;
-use typechecker::{GlobalName, Typechecker};
+use typechecker::Typechecker;
 
 #[derive(Debug)]
 pub enum Error {
@@ -115,7 +115,7 @@ impl<'a> Runner<'a> {
 
                 // TODO: figure out if/how we compile all decls in all imports
 
-                // Register types and function signatures with the typechecker
+                // Register types with the typechecker
                 for decl in &ast {
                     match decl {
                         Decl::Type {
@@ -136,15 +136,24 @@ impl<'a> Runner<'a> {
                                 return Err(Error::Type);
                             }
                         }
+                        _ => {}
+                    }
+                }
+                // Register function signatures with the typechecker
+                for decl in &ast {
+                    match decl {
                         Decl::Func {
                             name, r#type, loc, ..
                         } => {
-                            self.typechecker
-                                .register_func(&path, &name, &r#type, *loc)
-                                .unwrap();
+                            if let Err(error) =
+                                self.typechecker.register_func(&path, &name, &r#type, *loc)
+                            {
+                                writeln!(self.output, "Error:\n")?;
+                                ast::print_error(&mut self.output, &source, error);
+                                return Err(Error::Type);
+                            }
                         }
-                        Decl::Test { .. } => {}
-                        Decl::Import { .. } => {}
+                        _ => {}
                     }
                 }
 

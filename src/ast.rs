@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 /// (start, end) index pair into the source string
@@ -185,7 +185,7 @@ impl HasLoc for TypeConstructor {
 #[derive(Debug, Clone)]
 /// A type as written in source code.
 pub enum SourceType {
-    Named(Loc, String),
+    Named(Loc, Option<Namespace>, String),
     Func(Loc, Box<SourceType>, Box<SourceType>),
     Int(Loc),
     Bool(Loc),
@@ -206,7 +206,7 @@ pub enum SourceType {
 impl HasLoc for SourceType {
     fn loc(&self) -> Loc {
         match self {
-            Self::Named(loc, _) => *loc,
+            Self::Named(loc, _, _) => *loc,
             Self::Func(loc, _, _) => *loc,
             Self::Int(loc) => *loc,
             Self::Bool(loc) => *loc,
@@ -219,10 +219,50 @@ impl HasLoc for SourceType {
     }
 }
 
+/// A name qualified by the path to the file that defines it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GlobalName {
+    Builtin(String),
+    Named(PathBuf, String),
+}
+
+impl GlobalName {
+    pub fn builtin(name: &str) -> Self {
+        Self::Builtin(name.to_string())
+    }
+
+    pub fn named(path: &Path, name: &str) -> Self {
+        Self::Named(path.to_path_buf(), name.to_string())
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Builtin(s) => s,
+            Self::Named(_, s) => s,
+        }
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Self::Builtin(_) => None,
+            Self::Named(p, _) => Some(p),
+        }
+    }
+}
+
+impl std::fmt::Display for GlobalName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Builtin(s) => write!(f, "{s}"),
+            Self::Named(path, s) => write!(f, "{}:{s}", path.display()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A type as used in typechecking.
 pub enum Type {
-    Named(String),
+    Named(GlobalName),
     Func(Box<Type>, Box<Type>),
     Int,
     Str,
@@ -275,7 +315,7 @@ impl Type {
         context: TypeFormatContext,
     ) -> Result<(), std::fmt::Error> {
         match self {
-            Type::Named(n) => write!(f, "{}", n),
+            Type::Named(name) => write!(f, "{name}"),
             Type::Var(v) => write!(f, "{}", v),
             Type::Func(func, arg) => match context {
                 TypeFormatContext::Neutral => {
@@ -509,6 +549,7 @@ impl HasLoc for CaseBranch {
 pub enum Pattern {
     Constructor {
         loc: Loc,
+        namespace: Option<Namespace>,
         name: String,
         args: Vec<Pattern>,
     },
@@ -650,7 +691,7 @@ impl HasLoc for Pattern {
 
 /// The name of an import, e.g. `myName` in
 ///   import ./path/to/file.tl as myName
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Namespace(String);
 
 impl Namespace {
@@ -720,32 +761,5 @@ impl Type {
             t = Type::Func(Box::new((*arg).clone()), Box::new(t))
         }
         t
-    }
-
-    pub fn from_source_type(source_type: &SourceType) -> Self {
-        match source_type {
-            SourceType::Named(_, n) => Self::Named(n.to_string()),
-            SourceType::Func(_, f, x) => {
-                let f = Type::from_source_type(f);
-                let x = Type::from_source_type(x);
-                Self::Func(Box::new(f), Box::new(x))
-            }
-            SourceType::Int(_) => Type::Int,
-            SourceType::Bool(_) => Type::Bool,
-            SourceType::Str(_) => Type::Str,
-            SourceType::Char(_) => Type::Char,
-            SourceType::App { head, args, .. } => {
-                let head = Type::from_source_type(head);
-                let args = args.iter().map(|arg| Type::from_source_type(arg)).collect();
-                Self::App {
-                    head: Box::new(head),
-                    args,
-                }
-            }
-            SourceType::Var(_, v) => Type::Var(v.to_string()),
-            SourceType::Tuple { elems, .. } => {
-                Type::Tuple(elems.into_iter().map(Self::from_source_type).collect())
-            }
-        }
     }
 }
