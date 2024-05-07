@@ -58,6 +58,17 @@ impl Compiler {
             }
             e => (self.compile_expr(path, name, e, Vec::new(), true)?, vec![]),
         };
+        if name == "to_list" && path.ends_with("map.tl") {
+            dbg!(&path, &name, &body, &ins);
+            match ins[1] {
+                Instruction::Case(ref branches) => match branches[0] {
+                    (_, block_id) => {
+                        dbg!(&block_id, self.program.get_block(block_id));
+                    }
+                },
+                _ => {}
+            }
+        }
         let id = self.program.add_block(ins);
         let name = GlobalName::named(path, name);
         self.functions.insert(name.to_string(), (id, args));
@@ -91,7 +102,14 @@ impl Compiler {
                     }
                 }
             }
-            Expr::Var(_, Var::Global(_, _)) => todo!(),
+            Expr::Var(loc, Var::Global(namespace, name)) => {
+                // Look up the global's name
+                let global_name = self.imports.lookup(*loc, path, namespace, name).unwrap();
+                // Call the global to ensure it is evaluated to normal form
+                ins.push(Instruction::PushInt(0));
+                ins.push(Instruction::PushGlobal(global_name.to_string()));
+                ins.push(Instruction::Call);
+            }
             Expr::Var(_, Var::Constructor(_ns, c)) => {
                 debug!("{:?}", c);
                 ins.push(Instruction::PushCtor(c.clone()));
@@ -501,5 +519,9 @@ impl Program {
 
     pub fn get_block(&self, block_id: BlockId) -> &[Instruction] {
         self.blocks[block_id.0].as_slice()
+    }
+
+    pub fn len(&self) -> usize {
+        self.blocks.len()
     }
 }
