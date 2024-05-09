@@ -142,3 +142,27 @@ f : A {
 												  (var_pattern (l_ident))
 												  (list_pattern (var_pattern (l_ident))))
 				          rhs: (ctor (u_ident)))))))
+
+===
+Comments
+===
+
+// A comment here
+
+f : A {
+  // Another comment
+  5
+  // And another
+}
+
+---
+
+(source_file
+  (comment)
+  (func_decl
+    name: (l_ident)
+	type: (type_name (u_ident))
+	(comment)
+	body: (int)
+	(comment)
+	))

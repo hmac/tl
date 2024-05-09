@@ -8,6 +8,10 @@
         "name": "_decl"
       }
     },
+    "comment": {
+      "type": "PATTERN",
+      "value": "\\/\\/[^\\n]+"
+    },
     "_decl": {
       "type": "CHOICE",
       "members": [
@@ -235,7 +239,7 @@
     },
     "int": {
       "type": "PATTERN",
-      "value": "[1-9][0-9]*"
+      "value": "[0-9]+"
     },
     "string": {
       "type": "PATTERN",
@@ -841,6 +845,10 @@
     {
       "type": "PATTERN",
       "value": "\\s"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "comment"
     }
   ],
   "conflicts": [],

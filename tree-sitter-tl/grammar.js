@@ -6,8 +6,16 @@ const sep_by = (separator, ...rule) => optional(sep_by1(separator, ...rule));
 module.exports = grammar({
   name: 'tl',
 
+  extras: $ => [
+    /\s/,
+    $.comment
+  ],
+
   rules: {
     source_file: $ => repeat($._decl),
+
+    comment: $ => /\/\/[^\n]+/,
+
     _decl: $ => choice(
       $.func_decl
     ),
@@ -71,7 +79,7 @@ module.exports = grammar({
     ),
 
     ctor: $ => $.u_ident,
-    int: $ => /[1-9][0-9]*/,
+    int: $ => /[0-9]+/,
     string: $ => /"(\\[\\"]|[^\\"]*)"/,
     char: $ => /'[^']'/,
     tuple: $ => parens(

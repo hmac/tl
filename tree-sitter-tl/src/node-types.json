@@ -934,6 +934,10 @@
     "named": true
   },
   {
+    "type": "comment",
+    "named": true
+  },
+  {
     "type": "int",
     "named": true
   },
