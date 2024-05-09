@@ -1,0 +1,144 @@
+===
+Basic functions
+===
+
+map : (a -> b) -> List a -> List b {
+  [
+	1,
+	("apple", 'c'),
+	p -> q -> r,
+	p q r,
+	p q -> r,
+	p -> q r,
+	p -> q r -> s,
+    ]
+}
+
+---
+
+(source_file
+  (func_decl
+	name: (l_ident)
+	type: (func_type
+		    (func_type (var_type (l_ident)) (var_type (l_ident)))
+			(func_type (app_type head: (type_name (u_ident))
+					             (var_type (l_ident)))
+				  (app_type head: (type_name (u_ident))
+			           (var_type (l_ident)))))
+    body: (list
+				        (int)
+						(tuple (string) (char))
+						(func_or_app (func_params (l_ident))
+								     body: (func_or_app (func_params (l_ident))
+												        body: (func_or_app (func_params (l_ident)))))
+						(func_or_app (func_params (l_ident) (l_ident) (l_ident)))
+						(func_or_app (func_params (l_ident) (l_ident))
+						             body: (func_or_app (func_params (l_ident))))
+						(func_or_app (func_params (l_ident))
+								     body: (func_or_app (func_params (l_ident) (l_ident))))
+						(func_or_app (func_params (l_ident))
+								     body: (func_or_app (func_params (l_ident) (l_ident))
+													    body: (func_or_app (func_params (l_ident)))))
+  )
+))
+
+===
+Application/function precedence
+===
+
+f : A {
+  x y -> z
+}
+
+---
+
+(source_file
+  (func_decl
+    name: (l_ident)
+	type: (type_name (u_ident))
+	body: (func_or_app (func_params (l_ident) (l_ident))
+	            body: (func_or_app (func_params (l_ident)))
+		  )
+  )
+)
+
+===
+Case
+===
+
+f : A {
+	x -> case x {
+		Some r -> Foo,
+		None -> Bar
+	}
+}
+
+---
+
+(source_file
+  (func_decl
+	name: (l_ident)
+	type: (type_name (u_ident))
+	body: (func_or_app (func_params (l_ident))
+					   body: (case (func_or_app (func_params (l_ident)))
+								   (branch pattern: (ctor_pattern (u_ident) (var_pattern (l_ident)))
+										   rhs: (ctor (u_ident)))
+								   (branch pattern: (nullary_ctor_pattern (u_ident))
+										   rhs: (ctor (u_ident)))))))
+
+===
+Let
+===
+
+f : A {
+	let x = 5 {
+		Foo
+	}
+}
+
+---
+
+(source_file
+  (func_decl
+    name: (l_ident)
+	type: (type_name (u_ident))
+	body: (let (let_bind (l_ident) (int))
+	           body: (ctor (u_ident)))))
+
+===
+Patterns
+===
+
+f : A {
+	x -> case x {
+		[] -> Empty,
+		[y] -> One,
+		[y, z, ..r] -> Many,
+		[y, z, [], ..r] -> ManyWithEmpty,
+		(x, y, [z]) -> Other
+	}
+}
+
+---
+
+(source_file
+  (func_decl
+    name: (l_ident)
+	type: (type_name (u_ident))
+	body: (func_or_app (func_params (l_ident))
+	        body: (case (func_or_app (func_params (l_ident)))
+			      (branch pattern: (list_pattern) rhs: (ctor (u_ident)))
+				  (branch pattern: (list_pattern (var_pattern (l_ident))) rhs: (ctor (u_ident)))
+				  (branch pattern: (list_pattern (var_pattern (l_ident))
+				                                 (var_pattern (l_ident))
+												 (list_pattern_rest (l_ident)))
+						  rhs: (ctor (u_ident)))
+				  (branch pattern: (list_pattern (var_pattern (l_ident))
+				                                (var_pattern (l_ident))
+												(list_pattern)
+												(list_pattern_rest (l_ident)))
+						  rhs: (ctor (u_ident)))
+				  (branch pattern: (tuple_pattern (var_pattern (l_ident))
+												  (var_pattern (l_ident))
+												  (list_pattern (var_pattern (l_ident))))
+				          rhs: (ctor (u_ident)))))))

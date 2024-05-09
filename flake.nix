@@ -24,6 +24,8 @@
               rust
               rust-analyzer
               libiconv
+              tree-sitter
+              graphviz
             ];
           };
       });
