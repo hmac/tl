@@ -23,3 +23,5 @@
 
 (comment) @comment
 
+(nullary_ctor_pattern) @constructor
+(ctor_pattern (u_ident) @constructor)
