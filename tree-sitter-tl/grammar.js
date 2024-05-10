@@ -1,5 +1,6 @@
 const parens = (...rule) => seq('(', ...rule, ')');
 const brackets = (...rule) => seq('[', ...rule, ']');
+const braces = (...rule) => seq('{', ...rule, '}');
 const sep_by1 = (separator, ...rule) => seq(...rule, repeat(seq(separator, ...rule)), optional(separator));
 const sep_by = (separator, ...rule) => optional(sep_by1(separator, ...rule));
 
@@ -17,7 +18,8 @@ module.exports = grammar({
     comment: $ => /\/\/[^\n]+/,
 
     _decl: $ => choice(
-      $.func_decl
+      $.func_decl,
+      $.type_decl
     ),
 
     func_decl: $ => seq(
@@ -61,6 +63,24 @@ module.exports = grammar({
       $._expr_except_var,
       $.func_or_app
     ),
+
+    // Type declarations
+    type_decl: $ => seq(
+      "type",
+      field("name", $.u_ident),
+      optional(field("params", $.type_decl_params)),
+      braces(sep_by(",", $.type_decl_ctor))
+    ),
+
+    type_decl_params: $ => repeat1($.l_ident),
+
+    type_decl_ctor: $ => seq(
+      field("name", $.u_ident),
+      optional(field("params", $.type_decl_ctor_params))
+    ),
+    type_decl_ctor_params: $ => repeat1($._atomic_type),
+
+    // Expressions
 
     // Separate var from other expressions in order to parse applications and functions correctly.
     // TODO: explain this properly

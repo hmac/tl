@@ -1,0 +1,92 @@
+===
+Void
+===
+type Void {}
+---
+
+(source_file
+  (type_decl name: (u_ident)))
+
+===
+Unit
+===
+type Unit { Unit }
+---
+
+(source_file
+  (type_decl name: (u_ident)
+             (type_decl_ctor name: (u_ident))))
+
+===
+Bool
+===
+type Bool { True, False }
+---
+
+(source_file
+  (type_decl name: (u_ident)
+             (type_decl_ctor name: (u_ident))
+             (type_decl_ctor name: (u_ident))))
+===
+Option
+===
+type Option a { None, Some a }
+---
+
+(source_file
+  (type_decl name: (u_ident)
+             params: (type_decl_params (l_ident))
+             (type_decl_ctor name: (u_ident))
+             (type_decl_ctor name: (u_ident)
+                             params: (type_decl_ctor_params (var_type (l_ident))))))
+
+===
+Either
+===
+type Either a b { Left a, Right b }
+---
+
+(source_file
+  (type_decl name: (u_ident)
+             params: (type_decl_params (l_ident) (l_ident))
+             (type_decl_ctor name: (u_ident)
+                             params: (type_decl_ctor_params (var_type (l_ident))))
+             (type_decl_ctor name: (u_ident)
+                             params: (type_decl_ctor_params (var_type (l_ident))))))
+
+===
+List
+===
+type List a { Nil, Cons a (List a) }
+---
+
+(source_file
+  (type_decl name: (u_ident)
+             params: (type_decl_params (l_ident))
+             (type_decl_ctor name: (u_ident))
+             (type_decl_ctor name: (u_ident)
+                             params: (type_decl_ctor_params (var_type (l_ident))
+                                                            (app_type head: (type_name (u_ident))
+                                                                      (var_type (l_ident)))))))
+                                                                      
+===
+Tree
+===
+
+type Tree a {
+ Leaf,
+ Branch (Tree a) a (Tree a)
+}
+
+---
+
+(source_file
+  (type_decl name: (u_ident)
+             params: (type_decl_params (l_ident))
+             (type_decl_ctor name: (u_ident))
+             (type_decl_ctor name: (u_ident)
+                             params: (type_decl_ctor_params (app_type head: (type_name (u_ident))
+                                                                      (var_type (l_ident)))
+                                                            (var_type (l_ident))
+                                                            (app_type head: (type_name (u_ident))
+                                                                      (var_type (l_ident)))))))
