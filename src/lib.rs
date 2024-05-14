@@ -308,38 +308,3 @@ impl<'a> Runner<'a> {
         Ok(failures)
     }
 }
-
-// fn topo_sort(imports: &HashMap<PathBuf, HashMap<String, PathBuf>>) -> Result<SortedImports, Error> {
-//     let mut sorted = vec![];
-//     let all_paths: HashSet<&Path> = imports.keys().collect();
-//     let mut perm_marked = HashSet::new();
-//     let mut temp_marked = HashSet::new();
-
-//     fn visit(path: &Path) -> Result<(), Error> {
-//         if perm_marked.contains(path) {
-//             return;
-//         }
-//         if temp_marked.contains(path) {
-//             return Err(Error::ImportCycle(path.into()));
-//         }
-
-//         temp_marked.insert(path);
-
-//         for edge in imports.get(path).unwrap().values() {
-//             visit(edge)?;
-//         }
-
-//         temp_marked.remove(path);
-//         perm_marked.insert(path);
-//         sorted.push(path);
-//         all_paths.remove(path);
-//     }
-
-//     while let Some(path) = all_paths.difference(perm_marked).next() {
-//         visit(path);
-//     }
-//     Ok(sorted)
-// }
-
-// struct SortedImports {}
-// impl Iterator for SortedImports {}
