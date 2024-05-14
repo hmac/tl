@@ -13,7 +13,7 @@ const TYPE_CHAR: Type = Type::Char;
 #[derive(Debug)]
 pub enum Error {
     TypeAlreadyDefined(Loc, String),
-    UnknownType(Loc, String),
+    UnknownType(Loc, GlobalName),
     UnknownVariable(Loc, String),
     UnknownConstructor(Loc, String),
     EmptyMatch(Loc),
@@ -95,14 +95,44 @@ impl HasLoc for Error {
     }
 }
 
+impl Error {
+    pub fn with_path<'a>(&'a self, path: Option<&'a Path>) -> ErrorWithPath<'a> {
+        ErrorWithPath { error: self, path }
+    }
+}
+
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
+        self.with_path(None).fmt(f)
+    }
+}
+
+pub struct ErrorWithPath<'a> {
+    error: &'a Error,
+    path: Option<&'a Path>,
+}
+
+impl HasLoc for ErrorWithPath<'_> {
+    fn loc(&self) -> Loc {
+        self.error.loc()
+    }
+}
+
+impl std::fmt::Display for ErrorWithPath<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.error {
             Error::TypeAlreadyDefined(_, ty) => {
                 write!(f, "the type '{ty}' has already been defined elsewhere")
             }
             Error::UnknownType(_, ty) => {
-                write!(f, "unknown type '{ty}'")
+                write!(
+                    f,
+                    "unknown type '{}'",
+                    match self.path {
+                        Some(path) => ty.display_name_relative_to_path(path),
+                        None => ty.to_string(),
+                    }
+                )
             }
             Error::UnknownVariable(_, v) => {
                 write!(f, "unknown variable '{v}'")
@@ -116,7 +146,12 @@ impl std::fmt::Display for Error {
             Error::ExpectedType {
                 expected, actual, ..
             } => {
-                write!(f, "expected this to have the type {expected} but it actually has the type {actual}")
+                write!(
+                    f,
+                    "expected this to have the type {} but it actually has the type {}",
+                    expected.with_path(self.path),
+                    actual.with_path(self.path)
+                )
             }
             Error::CaseBranchArgNumberMismatch {
                 number_of_args_in_branch,
@@ -136,7 +171,8 @@ impl std::fmt::Display for Error {
             Error::ExpectedFunctionType { actual_type, .. } => {
                 write!(
                     f,
-                    "expected to have a function type, but its actual type is {actual_type}"
+                    "expected to have a function type, but its actual type is {}",
+                    actual_type.with_path(self.path)
                 )
             }
             Error::DuplicateConstructor { .. } => {
@@ -148,7 +184,8 @@ impl std::fmt::Display for Error {
             Error::CannotApplyNonFunction { actual_type, .. } => {
                 write!(
                     f,
-                    "this expression cannot be applied as a function, because it has type {actual_type}",
+                    "this expression cannot be applied as a function, because it has type {}",
+                    actual_type.with_path(self.path)
                 )
             }
             Error::TooManyArgumentsInFunction {
@@ -166,8 +203,10 @@ impl std::fmt::Display for Error {
                 }
                 write!(
                     f,
-                    "this function takes {actual_number_of_arguments} {}, but its type ({expected_type}) has only {expected_number_of_arguments} {}",
-                    pluralise(*actual_number_of_arguments), pluralise(*expected_number_of_arguments)
+                    "this function takes {actual_number_of_arguments} {}, but its type ({}) has only {expected_number_of_arguments} {}",
+                    pluralise(*actual_number_of_arguments),
+                    expected_type.with_path(self.path),
+                    pluralise(*expected_number_of_arguments)
                 )
             }
             Error::OccursCheck {
@@ -175,7 +214,9 @@ impl std::fmt::Display for Error {
             } => {
                 write!(
                     f,
-                    "expected this to have the type {expected} but it actually has the type {actual}. These types cannot be unified because one refers to the other."
+                    "expected this to have the type {} but it actually has the type {}. These types cannot be unified because one refers to the other.",
+                    expected.with_path(self.path),
+                    actual.with_path(self.path)
                 )
             }
             Error::MissingCasePattern { constructor, .. } => {
@@ -197,7 +238,8 @@ impl std::fmt::Display for Error {
             Error::ExpectedTupleType { actual_type, .. } => {
                 write!(
                     f,
-                    "expected this to have a tuple type, but its actual type is {actual_type}"
+                    "expected this to have a tuple type, but its actual type is {}",
+                    actual_type.with_path(self.path)
                 )
             }
             Error::MissingImport { namespace, .. } => {
@@ -345,7 +387,7 @@ impl Typechecker {
         // TODO: Check that function name is not already in use
         // TODO: Check that type is well-formed
         let ty = self.type_from_source_type(path, &source_type)?;
-        self.check_type(path, &ty, loc, &ty.vars())?;
+        self.check_type(path, &ty, source_type.loc(), &ty.vars())?;
         self.functions
             .insert(GlobalName::named(path, name), (loc, ty));
         Ok(())
@@ -928,12 +970,10 @@ impl Typechecker {
                         // Construct the result type from the remaining func_args
                         Ok(Type::from_func_args(&func_arg_types.collect()))
                     }
-                    _ => {
-                        return Err(Error::ExpectedFunctionType {
-                            loc: *loc,
-                            actual_type: head_ty.clone(),
-                        });
-                    }
+                    _ => Err(Error::ExpectedFunctionType {
+                        loc: *loc,
+                        actual_type: head_ty.clone(),
+                    }),
                 }
             }
             Expr::Let { bindings, body, .. } => {
@@ -1692,7 +1732,7 @@ impl Typechecker {
                         self.check_type(path, ctor_type, *loc, type_params)?;
                     }
                     None => {
-                        return Err(Error::UnknownType(*loc, type_name.to_string()));
+                        return Err(Error::UnknownType(*loc, type_name.clone()));
                     }
                 },
             }
@@ -1711,7 +1751,7 @@ impl Typechecker {
         match ty {
             Type::Named(name) => {
                 if !self.types.contains_key(&name) {
-                    return Err(Error::UnknownType(loc, name.to_string()));
+                    return Err(Error::UnknownType(loc, name.clone()));
                 }
             }
             Type::Func(f, x) => {

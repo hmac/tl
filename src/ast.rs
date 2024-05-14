@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    fmt::Display,
     path::{Path, PathBuf},
 };
 
@@ -63,11 +64,7 @@ fn string_index_to_line_col_number(
 //     ^
 // expected '-'
 //
-pub fn print_error<E: std::fmt::Display + HasLoc, W: std::io::Write>(
-    writer: &mut W,
-    orig: &str,
-    error: E,
-) {
+pub fn print_error<E: Display + HasLoc, W: std::io::Write>(writer: &mut W, orig: &str, error: E) {
     let (start, end) = error.loc();
     let newlines = calculate_lines(orig);
     let (start_line, start_col) = string_index_to_line_col_number(start, &newlines);
@@ -248,6 +245,14 @@ impl GlobalName {
             Self::Named(p, _) => Some(p),
         }
     }
+
+    pub fn display_name_relative_to_path(&self, path: &Path) -> String {
+        match self {
+            Self::Builtin(s) => s.to_string(),
+            Self::Named(p, s) if p == path => s.to_string(),
+            Self::Named(p, s) => format!("{}:{s}", p.display()),
+        }
+    }
 }
 
 impl std::fmt::Display for GlobalName {
@@ -275,7 +280,7 @@ pub enum Type {
 
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        self.fmt_with_context(f, TypeFormatContext::Neutral)
+        self.with_path(None).fmt(f)
     }
 }
 
@@ -299,35 +304,53 @@ impl Type {
             Type::Var(v) => vec![v.to_string()],
         }
     }
+
+    pub fn with_path<'a>(&'a self, path: Option<&'a Path>) -> TypeWithContext<'a> {
+        TypeWithContext {
+            r#type: self,
+            path,
+            ctx: TypeFormatContext::Neutral,
+        }
+    }
 }
 
-enum TypeFormatContext {
-    Neutral,
-    FuncLeft,
-    AppRight,
-    AppLeft,
+pub struct TypeWithContext<'a> {
+    r#type: &'a Type,
+    path: Option<&'a Path>,
+    ctx: TypeFormatContext,
 }
 
-impl Type {
-    fn fmt_with_context(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-        context: TypeFormatContext,
-    ) -> Result<(), std::fmt::Error> {
-        match self {
-            Type::Named(name) => write!(f, "{name}"),
+impl<'a> TypeWithContext<'a> {
+    pub fn with_context(&self, ctx: TypeFormatContext) -> TypeWithContext<'a> {
+        TypeWithContext {
+            r#type: self.r#type,
+            path: self.path,
+            ctx,
+        }
+    }
+}
+
+impl<'a> std::fmt::Display for TypeWithContext<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.r#type {
+            Type::Named(name) => match self.path {
+                Some(path) => write!(f, "{}", name.display_name_relative_to_path(path)),
+                None => write!(f, "{name}"),
+            },
             Type::Var(v) => write!(f, "{}", v),
-            Type::Func(func, arg) => match context {
+            Type::Func(func, arg) => match self.ctx {
                 TypeFormatContext::Neutral => {
-                    (*func).fmt_with_context(f, TypeFormatContext::FuncLeft)?;
+                    func.with_path(self.path)
+                        .with_context(TypeFormatContext::FuncLeft)
+                        .fmt(f)?;
                     write!(f, " -> ")?;
-                    (*arg).fmt_with_context(f, TypeFormatContext::Neutral)
+                    arg.with_path(self.path).fmt(f)
                 }
                 TypeFormatContext::FuncLeft
                 | TypeFormatContext::AppRight
                 | TypeFormatContext::AppLeft => {
                     write!(f, "(")?;
-                    self.fmt_with_context(f, TypeFormatContext::Neutral)?;
+                    self.with_context(TypeFormatContext::Neutral).fmt(f)?;
                     write!(f, ")")
                 }
             },
@@ -352,24 +375,37 @@ impl Type {
                     write!(f, ")")
                 }
             }
-            Type::App { head, args } => match context {
+            Type::App { head, args } => match self.ctx {
                 TypeFormatContext::Neutral | TypeFormatContext::AppLeft => {
-                    (*head).fmt_with_context(f, TypeFormatContext::AppLeft)?;
+                    head.with_path(self.path)
+                        .with_context(TypeFormatContext::AppLeft)
+                        .fmt(f)?;
                     for arg in args {
                         write!(f, " ")?;
-                        arg.fmt_with_context(f, TypeFormatContext::AppRight)?;
+                        arg.with_path(self.path)
+                            .with_context(TypeFormatContext::AppRight)
+                            .fmt(f)?;
                     }
                     Ok(())
                 }
                 TypeFormatContext::FuncLeft | TypeFormatContext::AppRight => {
                     write!(f, "(")?;
-                    self.fmt_with_context(f, TypeFormatContext::Neutral)?;
+                    self.with_context(TypeFormatContext::Neutral).fmt(f)?;
                     write!(f, ")")
                 }
             },
         }
     }
+}
 
+pub enum TypeFormatContext {
+    Neutral,
+    FuncLeft,
+    AppRight,
+    AppLeft,
+}
+
+impl Type {
     pub fn rename_vars(&mut self, substitution: &HashMap<String, String>) {
         match self {
             Type::Named(_) | Type::Int | Type::Bool | Type::Str | Type::Char => {}

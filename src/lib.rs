@@ -149,7 +149,11 @@ impl<'a> Runner<'a> {
                                 self.typechecker.register_func(&path, &name, &r#type, *loc)
                             {
                                 writeln!(self.output, "Error:\n")?;
-                                ast::print_error(&mut self.output, &source, error);
+                                ast::print_error(
+                                    &mut self.output,
+                                    &source,
+                                    error.with_path(Some(&path)),
+                                );
                                 return Err(Error::Type);
                             }
                         }
@@ -169,7 +173,11 @@ impl<'a> Runner<'a> {
                         Decl::Func { r#type, body, .. } => {
                             if let Err(error) = self.typechecker.check_func(&path, &body, &r#type) {
                                 writeln!(self.output, "Error:\n")?;
-                                ast::print_error(&mut self.output, &parser.into_input(), error);
+                                ast::print_error(
+                                    &mut self.output,
+                                    &parser.into_input(),
+                                    error.with_path(Some(&path)),
+                                );
                                 return Err(Error::Type);
                             }
                         }
@@ -197,7 +205,7 @@ impl<'a> Runner<'a> {
             Err(error) => {
                 writeln!(self.output, "Error:\n")?;
                 ast::print_error(&mut self.output, &parser.into_input(), error);
-                return Err(Error::Parse);
+                Err(Error::Parse)
             }
         }
     }
