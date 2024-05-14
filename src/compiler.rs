@@ -58,17 +58,6 @@ impl Compiler {
             }
             e => (self.compile_expr(path, name, e, Vec::new(), true)?, vec![]),
         };
-        if name == "to_list" && path.ends_with("map.tl") {
-            dbg!(&path, &name, &body, &ins);
-            match ins[1] {
-                Instruction::Case(ref branches) => match branches[0] {
-                    (_, block_id) => {
-                        dbg!(&block_id, self.program.get_block(block_id));
-                    }
-                },
-                _ => {}
-            }
-        }
         let id = self.program.add_block(ins);
         let name = GlobalName::named(path, name);
         self.functions.insert(name.to_string(), (id, args));
@@ -277,11 +266,11 @@ impl Compiler {
 
                         ins.push(Instruction::PushInt(args.len() as i64));
 
+                        let name = self.imports.lookup((0, 0), path, ns, v).unwrap();
                         // If we're doing a tail call, use the TailCall instruction
-                        if is_leaf && v == func_name {
+                        if is_leaf && name.name() == func_name && name.path() == Some(path) {
                             ins.push(Instruction::TailCall);
                         } else {
-                            let name = self.imports.lookup((0, 0), path, ns, v).unwrap();
                             ins.push(Instruction::PushGlobal(name.to_string()));
                             ins.push(Instruction::Call);
                         }
