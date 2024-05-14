@@ -41,6 +41,8 @@ test to_list_empty {
 }
 
 test from_list_to_list {
-  == (to_list (from_list tree.cmp_int [(1, "a"), (9, "b"), (2, "c"), (8, "d"), (3, "e"), (7, "f"), (4, "g"), (6, "h"), (5, "i")]))
-     [(1, "a"), (2, "c"), (3, "e"), (4, "g"), (5, "i"), (6, "h"), (7, "f"), (8, "d"), (9, "b")]
+  let unsorted = [(1, "a"), (9, "b"), (2, "c"), (8, "d"), (3, "e"), (7, "f"), (4, "g"), (6, "h"), (5, "i")],
+      sorted = [(1, "a"), (2, "c"), (3, "e"), (4, "g"), (5, "i"), (6, "h"), (7, "f"), (8, "d"), (9, "b")] {
+    == (to_list (from_list tree.cmp_int unsorted)) sorted
+  }
 }

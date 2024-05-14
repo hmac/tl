@@ -110,6 +110,7 @@ impl Compiler {
                     Operator::Mul => "*",
                     Operator::Lt => "<",
                     Operator::Eq => "==",
+                    Operator::Chars => "chars",
                 };
                 ins.push(Instruction::PushGlobal(format!("builtin:{op_name}")));
             }
@@ -291,6 +292,7 @@ impl Compiler {
                             Operator::Mul => Instruction::MulInt,
                             Operator::Lt => Instruction::LtInt,
                             Operator::Eq => Instruction::Eq,
+                            Operator::Chars => Instruction::Chars,
                         });
                     }
                     h => todo!("{:?}", h),
@@ -446,6 +448,20 @@ impl Compiler {
             },
         )
         .unwrap();
+        self.compile_func(
+            path,
+            "chars",
+            &Expr::Func {
+                loc: (0, 0),
+                args: vec![((0, 0), "s".to_string())],
+                body: Box::new(Expr::App {
+                    loc: (0, 0),
+                    head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Chars))),
+                    args: vec![Expr::Var((0, 0), Var::Local("s".to_string()))],
+                }),
+            },
+        )
+        .unwrap();
     }
 }
 
@@ -459,6 +475,7 @@ pub enum Instruction {
     MulInt,
     LtInt,
     Eq,
+    Chars,
     PushInt(i64),
     PushStr(String),
     PushChar(char),

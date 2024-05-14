@@ -95,6 +95,22 @@ impl Vm {
                     stack.push(Value::Bool(x == y));
                     ip += 1;
                 }
+                // Convert the string (top of stack) into a list of characters
+                Instruction::Chars => {
+                    let s = stack.pop().unwrap();
+                    match s {
+                        Value::Str(s) => {
+                            let elems = s.chars().rev();
+                            let mut list = Value::ListNil;
+                            for e in elems {
+                                list = Value::ListCons(Box::new(Value::Char(e)), Box::new(list));
+                            }
+                            stack.push(list);
+                            ip += 1;
+                        }
+                        _ => unreachable!("chars: arg is not a string"),
+                    }
+                }
 
                 Instruction::PushInt(n) => {
                     debug!("push_int({n})");

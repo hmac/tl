@@ -755,6 +755,11 @@ impl Parser {
                     return Err(Error::ExpectedLowerIdent((loc, self.loc)));
                 }
             }
+
+            if s == "chars" {
+                return Ok(Var::Operator(Operator::Chars));
+            }
+
             return Ok(Var::Local(s));
         }
 

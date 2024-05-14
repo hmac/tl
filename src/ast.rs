@@ -763,6 +763,7 @@ pub enum Operator {
     Mul,
     Eq,
     Lt,
+    Chars,
 }
 
 impl Type {

@@ -1301,6 +1301,10 @@ impl Typechecker {
                     }
                     Ok(ty)
                 }
+                Operator::Chars => Ok(Type::Func(
+                    Box::new(Type::Str),
+                    Box::new(self.make_list_type(Type::Char)),
+                )),
             },
         }
     }
