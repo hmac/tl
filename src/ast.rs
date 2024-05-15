@@ -439,6 +439,7 @@ pub enum Expr {
     Int(Loc, i64),
     Str(Loc, String),
     Char(Loc, char),
+    Bool(Loc, bool),
     Tuple {
         loc: Loc,
         elems: Vec<Expr>,
@@ -478,6 +479,7 @@ impl Expr {
             Expr::Int(_, _) => HashSet::new(),
             Expr::Str(_, _) => HashSet::new(),
             Expr::Char(_, _) => HashSet::new(),
+            Expr::Bool(_, _) => HashSet::new(),
             Expr::Tuple { elems, .. } => elems.iter().flat_map(Self::free_variables).collect(),
             Expr::List { elems, tail, .. } => {
                 let mut vars: HashSet<&String> =
@@ -546,16 +548,17 @@ impl Expr {
 impl HasLoc for Expr {
     fn loc(&self) -> Loc {
         match self {
-            Self::Var(loc, _) => *loc,
-            Self::Int(loc, _) => *loc,
-            Self::Str(loc, _) => *loc,
-            Self::Char(loc, _) => *loc,
-            Self::Tuple { loc, .. } => *loc,
-            Self::List { loc, .. } => *loc,
-            Self::Case { loc, .. } => *loc,
-            Self::Func { loc, .. } => *loc,
-            Self::App { loc, .. } => *loc,
-            Self::Let { loc, .. } => *loc,
+            Self::Var(loc, _)
+            | Self::Int(loc, _)
+            | Self::Str(loc, _)
+            | Self::Char(loc, _)
+            | Self::Bool(loc, _) => *loc,
+            Self::Tuple { loc, .. }
+            | Self::List { loc, .. }
+            | Self::Case { loc, .. }
+            | Self::Func { loc, .. }
+            | Self::App { loc, .. }
+            | Self::Let { loc, .. } => *loc,
         }
     }
 }
@@ -566,6 +569,12 @@ pub struct LetBinding {
     pub name: String,
     pub r#type: Option<SourceType>,
     pub value: Expr,
+}
+
+impl HasLoc for LetBinding {
+    fn loc(&self) -> Loc {
+        self.loc
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -616,6 +625,20 @@ pub enum Pattern {
         loc: Loc,
         elems: Vec<Pattern>,
     },
+}
+
+impl HasLoc for Pattern {
+    fn loc(&self) -> Loc {
+        *match self {
+            Pattern::Constructor { loc, .. } => loc,
+            Pattern::Var { loc, .. } => loc,
+            Pattern::Int { loc, .. } => loc,
+            Pattern::Wildcard { loc } => loc,
+            Pattern::ListNil { loc } => loc,
+            Pattern::ListCons { loc, .. } => loc,
+            Pattern::Tuple { loc, .. } => loc,
+        }
+    }
 }
 
 impl Pattern {
@@ -707,20 +730,6 @@ impl std::fmt::Display for Pattern {
                 }
                 write!(f, ")")
             }
-        }
-    }
-}
-
-impl HasLoc for Pattern {
-    fn loc(&self) -> Loc {
-        match self {
-            Self::Var { loc, .. } => *loc,
-            Self::Int { loc, .. } => *loc,
-            Self::Constructor { loc, .. } => *loc,
-            Self::Wildcard { loc, .. } => *loc,
-            Self::ListNil { loc } => *loc,
-            Self::ListCons { loc, .. } => *loc,
-            Self::Tuple { loc, .. } => *loc,
         }
     }
 }

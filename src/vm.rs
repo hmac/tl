@@ -127,6 +127,11 @@ impl Vm {
                     stack.push(Value::Char(*c));
                     ip += 1;
                 }
+                Instruction::PushBool(b) => {
+                    debug!("push_bool({b})");
+                    stack.push(Value::Bool(*b));
+                    ip += 1;
+                }
                 Instruction::PushGlobal(v) => {
                     if self.functions.get(v).is_none() {
                         dbg!(&self.functions);

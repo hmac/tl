@@ -640,7 +640,13 @@ impl Parser {
             let var = self.parse_var_or_constructor()?;
             let loc_end = self.loc;
             self.trim();
-            return Ok(Expr::Var((loc, loc_end), var));
+            // If the constructor is True or False, parse it as a Boolean.
+            return Ok(match var {
+                Var::Constructor(_, c) if c == "True" || c == "False" => {
+                    Expr::Bool((loc, loc_end), c == "True")
+                }
+                _ => Expr::Var((loc, loc_end), var),
+            });
         }
         if self.input().starts_with(operator_char) {
             // To ensure we don't parse x -> y as x - <parse error>

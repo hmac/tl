@@ -9,6 +9,7 @@ use tracing::debug;
 const TYPE_INT: Type = Type::Int;
 const TYPE_STRING: Type = Type::Str;
 const TYPE_CHAR: Type = Type::Char;
+const TYPE_BOOL: Type = Type::Bool;
 
 #[derive(Debug)]
 pub enum Error {
@@ -480,6 +481,9 @@ impl Typechecker {
             Expr::Char(loc, _) => {
                 self.assert_type_eq(type_variables, expected_type, &TYPE_CHAR, *loc)
             }
+            Expr::Bool(loc, _) => {
+                self.assert_type_eq(type_variables, expected_type, &TYPE_BOOL, *loc)
+            }
             Expr::Var(loc, v) => {
                 let ty = self.infer_var(local_variables, type_variables, path, v, *loc)?;
                 self.assert_type_eq(type_variables, expected_type, &ty, *loc)
@@ -848,6 +852,7 @@ impl Typechecker {
             Expr::Int(_, _) => Ok(TYPE_INT),
             Expr::Str(_, _) => Ok(TYPE_STRING),
             Expr::Char(_, _) => Ok(TYPE_STRING),
+            Expr::Bool(_, _) => Ok(TYPE_BOOL),
             Expr::Var(loc, v) => self.infer_var(local_variables, type_variables, path, v, *loc),
             Expr::Tuple { elems, .. } => {
                 let mut elem_types = vec![];
