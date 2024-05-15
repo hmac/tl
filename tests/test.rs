@@ -75,9 +75,13 @@ fn tests() {
             Ok(mut runner) => {
                 num_failures += runner.run_tests().unwrap();
             }
-            Err(_) => {
+            Err(ref error) => {
+                let error = format!("{:?}", error);
                 std::mem::drop(runner);
-                panic!("Error:\n{}", String::from_utf8(output_writer).unwrap());
+                panic!(
+                    "Error: {error}\n{}",
+                    String::from_utf8(output_writer).unwrap()
+                );
             }
         }
     }

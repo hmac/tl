@@ -1,3 +1,5 @@
+use ./list.tl as list
+
 type Ordering {
   Lt,
   Gt,
@@ -110,4 +112,26 @@ test lookup_2 {
     (insert cmp_int 3 True make_tree)) {
     == (lookup cmp_int 4 t) None
   }
+}
+
+size : Tree k v -> Int {
+  t -> case t {
+    Leaf -> 0,
+    Node _ l _ _ r -> + (+ (size l) (size r)) 1
+  }
+}
+
+to_list : Tree k v -> List (k, v,) {
+  t -> case t {
+    Leaf -> [],
+    Node _ l k v r ->
+      let list_l = to_list l,
+          list_r = to_list r {
+      list.append (to_list l) [(k, v,), ..to_list r]
+    }
+  }
+}
+
+from_list : (k -> k -> Ordering) -> List (k, v,) -> Tree k v {
+  ord l -> list.foldl (t kv -> case kv { (k, v,) -> insert ord k v t }) make_tree l
 }

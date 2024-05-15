@@ -2,7 +2,7 @@ use crate::ast::{
     CaseBranch, Decl, Expr, HasLoc, LetBinding, Loc, Operator, Pattern, SourceType,
     TypeConstructor, Var,
 };
-use std::collections::VecDeque;
+use std::{collections::VecDeque, path::PathBuf};
 
 #[derive(Debug)]
 pub enum Error {
@@ -17,6 +17,7 @@ pub enum Error {
     UnexpectedEof(Loc),
     ExpectedType(Loc),
     UnknownStringEscapeSequence(Loc),
+    FilePathIsNotRelative(Loc),
 }
 
 impl HasLoc for Error {
@@ -33,6 +34,7 @@ impl HasLoc for Error {
             Error::UnexpectedEof(loc) => *loc,
             Error::ExpectedType(loc) => *loc,
             Error::UnknownStringEscapeSequence(loc) => *loc,
+            Error::FilePathIsNotRelative(loc) => *loc,
         }
     }
 }
@@ -72,6 +74,9 @@ impl std::fmt::Display for Error {
             }
             Error::UnknownStringEscapeSequence(_) => {
                 write!(f, "unknown string escape sequence")
+            }
+            Error::FilePathIsNotRelative(_) => {
+                write!(f, "file path must be relative")
             }
         }
     }
@@ -211,27 +216,70 @@ impl Parser {
                         body,
                     })
                 }
-                None => {
-                    let name = self.parse_lower_ident()?;
-                    self.trim();
-                    self.eat(":")?;
-                    self.trim();
-                    let r#type = self.parse_type()?;
-                    self.trim();
-                    self.eat("{")?;
-                    self.trim();
-                    let body = self.parse_expr()?;
-                    self.trim();
-                    self.eat("}")?;
-                    self.trim();
-                    Ok(Decl::Func {
-                        loc: (loc, self.loc),
-                        name,
-                        r#type,
-                        body,
-                    })
-                }
+                None => match self.try_eat("use") {
+                    Some(_) => {
+                        self.trim();
+                        let path_loc_start = self.loc;
+                        let path = self.parse_relative_path()?;
+                        let path_loc = (path_loc_start, self.loc);
+                        self.trim();
+                        self.eat("as")?;
+                        self.trim();
+                        let name_loc_start = self.loc;
+                        let name = self.parse_lower_ident()?;
+                        let name_loc = (name_loc_start, self.loc);
+                        let r = Decl::Import {
+                            loc: (loc, self.loc),
+                            path,
+                            path_loc,
+                            name,
+                            name_loc,
+                        };
+                        self.trim();
+                        Ok(r)
+                    }
+                    None => {
+                        let name = self.parse_lower_ident()?;
+                        self.trim();
+                        self.eat(":")?;
+                        self.trim();
+                        let r#type = self.parse_type()?;
+                        self.trim();
+                        self.eat("{")?;
+                        self.trim();
+                        let body = self.parse_expr()?;
+                        self.trim();
+                        self.eat("}")?;
+                        self.trim();
+                        Ok(Decl::Func {
+                            loc: (loc, self.loc),
+                            name,
+                            r#type,
+                            body,
+                        })
+                    }
+                },
             },
+        }
+    }
+
+    fn parse_relative_path(&mut self) -> Result<PathBuf, Error> {
+        let loc = self.loc;
+        let mut len = 0;
+        while !self.input()[len..].starts_with(char::is_whitespace) {
+            len += 1;
+        }
+
+        let (s, _) = self.input().split_at(len);
+        let path: PathBuf = s.parse().unwrap_or_else(|never| match never {});
+        self.loc += len;
+        let loc_end = self.loc;
+        self.trim();
+
+        if !path.is_relative() {
+            Err(Error::FilePathIsNotRelative((loc, loc_end)))
+        } else {
+            Ok(path)
         }
     }
 
@@ -317,23 +365,63 @@ impl Parser {
     // (Bool -> Bool)
     // (Foo Bar)
     // (Foo -> Bar Baz)
+    // some_import.Foo
     fn parse_type_nested(&mut self) -> Result<SourceType, Error> {
         if self.input().starts_with("(") {
             return self.parse_tuple_or_parenthesised_type();
         } else {
             let loc = self.loc;
-            if self.input().starts_with(upper_ident_char) {
-                let type_name = self.parse_upper_ident()?;
+
+            // A leading underscore could be part of a namespace or a type.
+            // Start by parsing all leading underscores, the add them on to the result of the next
+            // parse.
+            let mut leading_underscores = 0;
+            while self.input().starts_with('_') {
+                self.eat("_")?;
+                leading_underscores += 1;
+            }
+
+            if self.input().starts_with(lower_ident_char) {
+                let namespace_or_type_var = self.parse_lower_ident()?;
+                let r = format!("{}{namespace_or_type_var}", "_".repeat(leading_underscores));
+                leading_underscores = 0;
+
+                // If the next char is ".", we have parsed a namespace.
+                // Otherwise we've parsed a type variable.
+                if self.input().starts_with(".") {
+                    self.eat(".")?;
+
+                    while self.input().starts_with('_') {
+                        self.eat("_")?;
+                        leading_underscores += 1;
+                    }
+
+                    let type_name = format!(
+                        "{}{}",
+                        "_".repeat(leading_underscores),
+                        self.parse_upper_ident()?
+                    );
+                    Ok(SourceType::Named(
+                        (loc, self.loc),
+                        Some(r.into()),
+                        type_name,
+                    ))
+                } else {
+                    Ok(SourceType::Var((loc, self.loc), r))
+                }
+            } else {
+                let type_name = format!(
+                    "{}{}",
+                    "_".repeat(leading_underscores),
+                    self.parse_upper_ident()?
+                );
                 Ok(match type_name.as_str() {
                     "Int" => SourceType::Int((loc, self.loc)),
                     "Bool" => SourceType::Bool((loc, self.loc)),
                     "String" => SourceType::Str((loc, self.loc)),
                     "Char" => SourceType::Char((loc, self.loc)),
-                    _ => SourceType::Named((loc, self.loc), type_name),
+                    _ => SourceType::Named((loc, self.loc), None, type_name),
                 })
-            } else {
-                let type_var = self.parse_lower_ident()?;
-                Ok(SourceType::Var((loc, self.loc), type_var))
             }
         }
     }
@@ -552,7 +640,13 @@ impl Parser {
             let var = self.parse_var_or_constructor()?;
             let loc_end = self.loc;
             self.trim();
-            return Ok(Expr::Var((loc, loc_end), var));
+            // If the constructor is True or False, parse it as a Boolean.
+            return Ok(match var {
+                Var::Constructor(_, c) if c == "True" || c == "False" => {
+                    Expr::Bool((loc, loc_end), c == "True")
+                }
+                _ => Expr::Var((loc, loc_end), var),
+            });
         }
         if self.input().starts_with(operator_char) {
             // To ensure we don't parse x -> y as x - <parse error>
@@ -625,12 +719,53 @@ impl Parser {
         if self.input().starts_with(upper_ident_char) {
             let n = self.parse_upper_ident()?;
             let s = format!("{}{n}", "_".repeat(leading_underscores));
-            return Ok(Var::Constructor(s));
+            return Ok(Var::Constructor(None, s));
         }
 
         if self.input().starts_with(lower_ident_char) {
             let n = self.parse_lower_ident()?;
             let s = format!("{}{n}", "_".repeat(leading_underscores));
+
+            // If there's a dot, then we're parsing a namespaced constructor/variable
+            if self.input().starts_with(".") {
+                self.eat(".")?;
+
+                let namespace = s;
+                let loc = self.loc;
+
+                let mut leading_underscores = 0;
+                while self.input().starts_with('_') {
+                    self.eat("_")?;
+                    leading_underscores += 1;
+                }
+
+                if self.input().starts_with(upper_ident_char) {
+                    let n = self.parse_upper_ident()?;
+                    let s = format!("{}{n}", "_".repeat(leading_underscores));
+                    return Ok(Var::Constructor(Some(namespace.into()), s));
+                }
+
+                if self.input().starts_with(lower_ident_char) {
+                    let n = self.parse_lower_ident()?;
+                    let v = format!("{}{n}", "_".repeat(leading_underscores));
+                    return Ok(Var::Global(Some(namespace.into()), v));
+                }
+
+                // If we've reached here, we've parsed only some underscores,
+                // with a namespace, e.g. foo.___
+                // This is a weird name but it doesn't seem worth banning it right now.
+                if leading_underscores > 0 {
+                    let s = "_".repeat(leading_underscores);
+                    return Ok(Var::Global(Some(namespace.into()), s));
+                } else {
+                    return Err(Error::ExpectedLowerIdent((loc, self.loc)));
+                }
+            }
+
+            if s == "chars" {
+                return Ok(Var::Operator(Operator::Chars));
+            }
+
             return Ok(Var::Local(s));
         }
 
@@ -779,10 +914,24 @@ impl Parser {
                     loc: (loc, self.loc),
                 });
             } else {
-                return Ok(Pattern::Var {
-                    loc: (loc, self.loc),
-                    name,
-                });
+                if self.input().starts_with(".") {
+                    // We're parsing a namespaced constructor
+                    self.eat(".")?;
+                    let namespace = Some(name.into());
+                    let name = self.parse_upper_ident()?;
+                    self.trim();
+                    return Ok(Pattern::Constructor {
+                        loc: (loc, self.loc),
+                        namespace,
+                        name,
+                        args: vec![],
+                    });
+                } else {
+                    return Ok(Pattern::Var {
+                        loc: (loc, self.loc),
+                        name,
+                    });
+                }
             }
         }
 
@@ -859,6 +1008,7 @@ impl Parser {
         }
         Ok(Pattern::Constructor {
             loc: (loc, self.loc),
+            namespace: None,
             name,
             args,
         })
@@ -881,10 +1031,24 @@ impl Parser {
                     loc: (loc, self.loc),
                 });
             } else {
-                return Ok(Pattern::Var {
-                    loc: (loc, self.loc),
-                    name,
-                });
+                if self.input().starts_with(".") {
+                    // We're parsing a namespaced constructor
+                    self.eat(".")?;
+                    let namespace = Some(name.into());
+                    let name = self.parse_upper_ident()?;
+                    self.trim();
+                    return Ok(Pattern::Constructor {
+                        loc: (loc, self.loc),
+                        namespace,
+                        name,
+                        args: vec![],
+                    });
+                } else {
+                    return Ok(Pattern::Var {
+                        loc: (loc, self.loc),
+                        name,
+                    });
+                }
             }
         }
         if self.input().starts_with("(") {
@@ -901,6 +1065,7 @@ impl Parser {
         self.trim();
         Ok(Pattern::Constructor {
             loc: (loc, self.loc),
+            namespace: None,
             name,
             args: vec![],
         })

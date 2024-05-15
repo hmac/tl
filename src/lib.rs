@@ -6,12 +6,14 @@ mod stack;
 pub mod typechecker;
 mod vm;
 
+use std::collections::HashMap;
 use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use ast::Decl;
+use ast::{Decl, GlobalName, HasLoc, Loc};
 use tracing::debug;
+use typechecker::Typechecker;
 
 #[derive(Debug)]
 pub enum Error {
@@ -19,6 +21,7 @@ pub enum Error {
     Type,
     Eval,
     IO(io::Error),
+    ImportCycle(PathBuf),
 }
 
 impl From<io::Error> for Error {
@@ -27,12 +30,29 @@ impl From<io::Error> for Error {
     }
 }
 
+struct ImportPathDoesNotExist {
+    loc: Loc,
+}
+
+impl HasLoc for ImportPathDoesNotExist {
+    fn loc(&self) -> ast::Loc {
+        self.loc
+    }
+}
+
+impl std::fmt::Display for ImportPathDoesNotExist {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "no file matches this import path")
+    }
+}
+
 pub struct Runner<'a> {
-    _path: PathBuf,
-    _source: String,
-    ast: Vec<Decl>,
-    vm: vm::Vm,
+    // Maps file paths to their parsed contents
+    files: HashMap<PathBuf, Vec<Decl>>,
+    // The path of the main file
+    path: PathBuf,
     output: Box<dyn Write + 'a>,
+    typechecker: Typechecker,
 }
 
 impl<'a> Runner<'a> {
@@ -42,12 +62,60 @@ impl<'a> Runner<'a> {
         Self::new(path, source, output)
     }
 
-    pub fn new<W: Write + 'a>(path: &Path, source: String, mut output: W) -> Result<Self, Error> {
+    pub fn new<W: Write + 'a>(path: &Path, source: String, output: W) -> Result<Self, Error> {
+        let mut this = Self {
+            files: HashMap::new(),
+            path: path.to_path_buf(),
+            output: Box::new(output),
+            typechecker: Typechecker::new(),
+        };
+        this.load_file_source(path, source)?;
+        Ok(this)
+    }
+
+    fn load_file(&mut self, path: &Path) -> Result<(), Error> {
+        self.load_file_source(path, std::fs::read_to_string(path)?)
+    }
+
+    fn load_file_source(&mut self, path: &Path, source: String) -> Result<(), Error> {
+        let path = path.canonicalize()?;
+
         let mut parser = parser::Parser::new(source.clone());
         match parser.parse() {
             Ok(ast) => {
-                let mut typechecker = typechecker::Typechecker::new();
+                // Process all imports first
+                let mut imports = HashMap::new();
+                for decl in &ast {
+                    match decl {
+                        Decl::Import {
+                            name,
+                            path: import_path,
+                            path_loc,
+                            ..
+                        } => {
+                            let abs_path = match path.parent() {
+                                None => import_path.into(),
+                                Some(dir) => match dir.join(&import_path).canonicalize() {
+                                    Ok(p) => Ok(p),
+                                    Err(e) => {
+                                        writeln!(self.output, "Error:\n")?;
+                                        let error = ImportPathDoesNotExist { loc: *path_loc };
+                                        ast::print_error(&mut self.output, &source, error);
+                                        Err(e)
+                                    }
+                                }?,
+                            };
+                            self.load_file(&abs_path)?;
+                            imports.insert(name.to_string(), abs_path);
+                        }
+                        _ => {}
+                    }
+                }
+                self.typechecker.imports.insert(&path, imports);
 
+                // TODO: figure out if/how we compile all decls in all imports
+
+                // Register types with the typechecker
                 for decl in &ast {
                     match decl {
                         Decl::Type {
@@ -56,44 +124,71 @@ impl<'a> Runner<'a> {
                             constructors,
                             loc,
                         } => {
-                            if let Err(error) =
-                                typechecker.register_type(&name, &params, &constructors, *loc)
-                            {
-                                writeln!(output, "Error:\n")?;
-                                ast::print_error(&mut output, &source, error);
+                            if let Err(error) = self.typechecker.register_type(
+                                &path,
+                                &name,
+                                &params,
+                                &constructors,
+                                *loc,
+                            ) {
+                                writeln!(self.output, "Error:\n")?;
+                                ast::print_error(&mut self.output, &source, error);
                                 return Err(Error::Type);
                             }
                         }
+                        _ => {}
+                    }
+                }
+                // Register function signatures with the typechecker
+                for decl in &ast {
+                    match decl {
                         Decl::Func {
                             name, r#type, loc, ..
                         } => {
-                            typechecker.register_func(&name, &r#type, *loc).unwrap();
+                            if let Err(error) =
+                                self.typechecker.register_func(&path, &name, &r#type, *loc)
+                            {
+                                writeln!(self.output, "Error:\n")?;
+                                ast::print_error(
+                                    &mut self.output,
+                                    &source,
+                                    error.with_path(Some(&path)),
+                                );
+                                return Err(Error::Type);
+                            }
                         }
-                        Decl::Test { .. } => {}
+                        _ => {}
                     }
                 }
 
-                if let Err(error) = typechecker.check_all_types() {
-                    writeln!(output, "Error:\n")?;
-                    ast::print_error(&mut output, &parser.into_input(), error);
+                if let Err(error) = self.typechecker.check_all_types() {
+                    writeln!(self.output, "Error:\n")?;
+                    ast::print_error(&mut self.output, &parser.into_input(), error);
                     return Err(Error::Type);
                 }
 
+                // Check function and test bodies against their type
                 for decl in &ast {
                     match decl {
                         Decl::Func { r#type, body, .. } => {
-                            if let Err(error) = typechecker.check_func(&body, &r#type) {
-                                writeln!(output, "Error:\n")?;
-                                ast::print_error(&mut output, &parser.into_input(), error);
+                            if let Err(error) = self.typechecker.check_func(&path, &body, &r#type) {
+                                writeln!(self.output, "Error:\n")?;
+                                ast::print_error(
+                                    &mut self.output,
+                                    &parser.into_input(),
+                                    error.with_path(Some(&path)),
+                                );
                                 return Err(Error::Type);
                             }
                         }
                         Decl::Test { name, body, .. } => {
-                            if let Err(error) =
-                                typechecker.check_func(&body, &ast::SourceType::Bool((0, 0)))
-                            {
-                                writeln!(output, "Error in test {name}:\n")?;
-                                ast::print_error(&mut output, &parser.into_input(), error);
+                            if let Err(error) = self.typechecker.check_func(
+                                &path,
+                                &body,
+                                &ast::SourceType::Bool((0, 0)),
+                            ) {
+                                writeln!(self.output, "Error in test {name}:\n")?;
+                                ast::print_error(&mut self.output, &parser.into_input(), error);
                                 return Err(Error::Type);
                             }
                         }
@@ -101,46 +196,54 @@ impl<'a> Runner<'a> {
                     }
                 }
 
-                let mut compiler = compiler::Compiler::new();
+                self.files.insert(path.into(), ast);
 
-                for decl in &ast {
-                    match decl {
-                        Decl::Func { name, body, .. } => {
-                            compiler.compile_func(name, &body).unwrap();
-                        }
-                        Decl::Test { name, body, .. } => {
-                            // Test names may overlap with function names, so do some hacky
-                            // namespacing.
-                            // TODO: proper namespacing for tests
-                            compiler
-                                .compile_func(&format!("test_{name}"), &body)
-                                .unwrap();
-                        }
-                        _ => {}
-                    }
-                }
+                // We compile the root file after loading and typechecking all imports is done.
 
-                let vm = vm::Vm::from_compiler(compiler);
-
-                Ok(Self {
-                    _path: path.to_owned(),
-                    _source: source,
-                    ast,
-                    vm,
-                    output: Box::new(output),
-                })
+                Ok(())
             }
             Err(error) => {
-                writeln!(output, "Error:\n")?;
-                ast::print_error(&mut output, &parser.into_input(), error);
-                return Err(Error::Parse);
+                writeln!(self.output, "Error:\n")?;
+                ast::print_error(&mut self.output, &parser.into_input(), error);
+                Err(Error::Parse)
             }
         }
     }
 
+    fn compile(&self) -> Result<compiler::Compiler, Error> {
+        let mut compiler = compiler::Compiler::new(self.typechecker.imports.clone());
+
+        // It doesn't matter what order we compile the functions in
+        for (path, ast) in self.files.iter() {
+            for decl in ast {
+                match decl {
+                    Decl::Func { name, body, .. } => {
+                        compiler.compile_func(path, &name, &body).unwrap();
+                    }
+                    Decl::Test { name, body, .. } => {
+                        // Test names may overlap with function names, so do some hacky
+                        // namespacing.
+                        // TODO: proper namespacing for tests
+                        compiler
+                            .compile_func(path, &format!("test_{name}"), &body)
+                            .unwrap();
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(compiler)
+    }
+
     pub fn run(&mut self, func_name: &str) -> Result<vm::Value, Error> {
-        match self.vm.functions.get(func_name) {
-            Some((func_instr_loc, _)) => match self.vm.run(*func_instr_loc) {
+        let compiler = self.compile()?;
+        let vm = vm::Vm::from_compiler(compiler);
+
+        let func_name =
+            GlobalName::named(&self.path.canonicalize().unwrap(), func_name).to_string();
+        match vm.functions.get(&func_name) {
+            Some((func_instr_loc, _)) => match vm.run(*func_instr_loc) {
                 Ok(value) => Ok(value),
                 Err(error) => {
                     writeln!(&mut self.output, "Error:\n")?;
@@ -158,32 +261,26 @@ impl<'a> Runner<'a> {
     }
 
     pub fn run_tests(&mut self) -> Result<usize, Error> {
+        let compiler = self.compile()?;
+        let vm = vm::Vm::from_compiler(compiler);
+
         let mut failures = 0;
 
-        for decl in &self.ast {
+        let path = self.path.canonicalize().unwrap();
+        for decl in self.files.get(&path).unwrap() {
             match decl {
                 Decl::Test { name, .. } => {
                     debug!("running test {name}");
-                    let test_name = format!("test_{name}");
-                    let (block_id, _args) = self.vm.functions.get(&test_name).unwrap();
-                    match self.vm.run(*block_id) {
+                    let test_name = GlobalName::named(&path, &format!("test_{name}")).to_string();
+                    let (block_id, _args) = vm.functions.get(&test_name).unwrap();
+                    match vm.run(*block_id) {
                         Ok(result) => match result {
                             vm::Value::Int(_) => todo!(),
                             vm::Value::Bool(true) => {
-                                writeln!(&mut self.output, "{name}: PASS\n")?;
+                                writeln!(&mut self.output, "PASS: {name}")?;
                             }
                             vm::Value::Bool(false) => {
-                                writeln!(&mut self.output, "{name}: FAIL\n")?;
-                                failures += 1;
-                            }
-                            // TODO: remove by adding bools to the AST
-                            vm::Value::Constructor { name, args } if name == "True" => {
-                                assert!(args.is_empty());
-                                writeln!(&mut self.output, "{name}: PASS\n")?;
-                            }
-                            vm::Value::Constructor { name, args } if name == "False" => {
-                                assert!(args.is_empty());
-                                writeln!(&mut self.output, "{name}: FAIL\n")?;
+                                writeln!(&mut self.output, "FAIL: {name}")?;
                                 failures += 1;
                             }
                             _ => {

@@ -1,4 +1,8 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    fmt::Display,
+    path::{Path, PathBuf},
+};
 
 /// (start, end) index pair into the source string
 pub type Loc = (usize, usize);
@@ -60,11 +64,7 @@ fn string_index_to_line_col_number(
 //     ^
 // expected '-'
 //
-pub fn print_error<E: std::fmt::Display + HasLoc, W: std::io::Write>(
-    writer: &mut W,
-    orig: &str,
-    error: E,
-) {
+pub fn print_error<E: Display + HasLoc, W: std::io::Write>(writer: &mut W, orig: &str, error: E) {
     let (start, end) = error.loc();
     let newlines = calculate_lines(orig);
     let (start_line, start_col) = string_index_to_line_col_number(start, &newlines);
@@ -140,6 +140,13 @@ pub enum Decl {
         r#type: SourceType,
         body: Expr,
     },
+    Import {
+        loc: Loc,
+        name: String,
+        name_loc: Loc,
+        path: PathBuf,
+        path_loc: Loc,
+    },
     Test {
         loc: Loc,
         name: String,
@@ -152,6 +159,7 @@ impl HasLoc for Decl {
         match self {
             Self::Type { loc, .. } => *loc,
             Self::Func { loc, .. } => *loc,
+            Self::Import { loc, .. } => *loc,
             Self::Test { loc, .. } => *loc,
         }
     }
@@ -174,7 +182,7 @@ impl HasLoc for TypeConstructor {
 #[derive(Debug, Clone)]
 /// A type as written in source code.
 pub enum SourceType {
-    Named(Loc, String),
+    Named(Loc, Option<Namespace>, String),
     Func(Loc, Box<SourceType>, Box<SourceType>),
     Int(Loc),
     Bool(Loc),
@@ -195,7 +203,7 @@ pub enum SourceType {
 impl HasLoc for SourceType {
     fn loc(&self) -> Loc {
         match self {
-            Self::Named(loc, _) => *loc,
+            Self::Named(loc, _, _) => *loc,
             Self::Func(loc, _, _) => *loc,
             Self::Int(loc) => *loc,
             Self::Bool(loc) => *loc,
@@ -208,10 +216,58 @@ impl HasLoc for SourceType {
     }
 }
 
+/// A name qualified by the path to the file that defines it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GlobalName {
+    Builtin(String),
+    Named(PathBuf, String),
+}
+
+impl GlobalName {
+    pub fn builtin(name: &str) -> Self {
+        Self::Builtin(name.to_string())
+    }
+
+    pub fn named(path: &Path, name: &str) -> Self {
+        Self::Named(path.to_path_buf(), name.to_string())
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Builtin(s) => s,
+            Self::Named(_, s) => s,
+        }
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Self::Builtin(_) => None,
+            Self::Named(p, _) => Some(p),
+        }
+    }
+
+    pub fn display_name_relative_to_path(&self, path: &Path) -> String {
+        match self {
+            Self::Builtin(s) => s.to_string(),
+            Self::Named(p, s) if p == path => s.to_string(),
+            Self::Named(p, s) => format!("{}:{s}", p.display()),
+        }
+    }
+}
+
+impl std::fmt::Display for GlobalName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Builtin(s) => write!(f, "{s}"),
+            Self::Named(path, s) => write!(f, "{}:{s}", path.display()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A type as used in typechecking.
 pub enum Type {
-    Named(String),
+    Named(GlobalName),
     Func(Box<Type>, Box<Type>),
     Int,
     Str,
@@ -224,7 +280,7 @@ pub enum Type {
 
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        self.fmt_with_context(f, TypeFormatContext::Neutral)
+        self.with_path(None).fmt(f)
     }
 }
 
@@ -248,35 +304,53 @@ impl Type {
             Type::Var(v) => vec![v.to_string()],
         }
     }
+
+    pub fn with_path<'a>(&'a self, path: Option<&'a Path>) -> TypeWithContext<'a> {
+        TypeWithContext {
+            r#type: self,
+            path,
+            ctx: TypeFormatContext::Neutral,
+        }
+    }
 }
 
-enum TypeFormatContext {
-    Neutral,
-    FuncLeft,
-    AppRight,
-    AppLeft,
+pub struct TypeWithContext<'a> {
+    r#type: &'a Type,
+    path: Option<&'a Path>,
+    ctx: TypeFormatContext,
 }
 
-impl Type {
-    fn fmt_with_context(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-        context: TypeFormatContext,
-    ) -> Result<(), std::fmt::Error> {
-        match self {
-            Type::Named(n) => write!(f, "{}", n),
+impl<'a> TypeWithContext<'a> {
+    pub fn with_context(&self, ctx: TypeFormatContext) -> TypeWithContext<'a> {
+        TypeWithContext {
+            r#type: self.r#type,
+            path: self.path,
+            ctx,
+        }
+    }
+}
+
+impl<'a> std::fmt::Display for TypeWithContext<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.r#type {
+            Type::Named(name) => match self.path {
+                Some(path) => write!(f, "{}", name.display_name_relative_to_path(path)),
+                None => write!(f, "{name}"),
+            },
             Type::Var(v) => write!(f, "{}", v),
-            Type::Func(func, arg) => match context {
+            Type::Func(func, arg) => match self.ctx {
                 TypeFormatContext::Neutral => {
-                    (*func).fmt_with_context(f, TypeFormatContext::FuncLeft)?;
+                    func.with_path(self.path)
+                        .with_context(TypeFormatContext::FuncLeft)
+                        .fmt(f)?;
                     write!(f, " -> ")?;
-                    (*arg).fmt_with_context(f, TypeFormatContext::Neutral)
+                    arg.with_path(self.path).fmt(f)
                 }
                 TypeFormatContext::FuncLeft
                 | TypeFormatContext::AppRight
                 | TypeFormatContext::AppLeft => {
                     write!(f, "(")?;
-                    self.fmt_with_context(f, TypeFormatContext::Neutral)?;
+                    self.with_context(TypeFormatContext::Neutral).fmt(f)?;
                     write!(f, ")")
                 }
             },
@@ -301,24 +375,37 @@ impl Type {
                     write!(f, ")")
                 }
             }
-            Type::App { head, args } => match context {
+            Type::App { head, args } => match self.ctx {
                 TypeFormatContext::Neutral | TypeFormatContext::AppLeft => {
-                    (*head).fmt_with_context(f, TypeFormatContext::AppLeft)?;
+                    head.with_path(self.path)
+                        .with_context(TypeFormatContext::AppLeft)
+                        .fmt(f)?;
                     for arg in args {
                         write!(f, " ")?;
-                        arg.fmt_with_context(f, TypeFormatContext::AppRight)?;
+                        arg.with_path(self.path)
+                            .with_context(TypeFormatContext::AppRight)
+                            .fmt(f)?;
                     }
                     Ok(())
                 }
                 TypeFormatContext::FuncLeft | TypeFormatContext::AppRight => {
                     write!(f, "(")?;
-                    self.fmt_with_context(f, TypeFormatContext::Neutral)?;
+                    self.with_context(TypeFormatContext::Neutral).fmt(f)?;
                     write!(f, ")")
                 }
             },
         }
     }
+}
 
+pub enum TypeFormatContext {
+    Neutral,
+    FuncLeft,
+    AppRight,
+    AppLeft,
+}
+
+impl Type {
     pub fn rename_vars(&mut self, substitution: &HashMap<String, String>) {
         match self {
             Type::Named(_) | Type::Int | Type::Bool | Type::Str | Type::Char => {}
@@ -352,6 +439,7 @@ pub enum Expr {
     Int(Loc, i64),
     Str(Loc, String),
     Char(Loc, char),
+    Bool(Loc, bool),
     Tuple {
         loc: Loc,
         elems: Vec<Expr>,
@@ -391,6 +479,7 @@ impl Expr {
             Expr::Int(_, _) => HashSet::new(),
             Expr::Str(_, _) => HashSet::new(),
             Expr::Char(_, _) => HashSet::new(),
+            Expr::Bool(_, _) => HashSet::new(),
             Expr::Tuple { elems, .. } => elems.iter().flat_map(Self::free_variables).collect(),
             Expr::List { elems, tail, .. } => {
                 let mut vars: HashSet<&String> =
@@ -459,16 +548,17 @@ impl Expr {
 impl HasLoc for Expr {
     fn loc(&self) -> Loc {
         match self {
-            Self::Var(loc, _) => *loc,
-            Self::Int(loc, _) => *loc,
-            Self::Str(loc, _) => *loc,
-            Self::Char(loc, _) => *loc,
-            Self::Tuple { loc, .. } => *loc,
-            Self::List { loc, .. } => *loc,
-            Self::Case { loc, .. } => *loc,
-            Self::Func { loc, .. } => *loc,
-            Self::App { loc, .. } => *loc,
-            Self::Let { loc, .. } => *loc,
+            Self::Var(loc, _)
+            | Self::Int(loc, _)
+            | Self::Str(loc, _)
+            | Self::Char(loc, _)
+            | Self::Bool(loc, _) => *loc,
+            Self::Tuple { loc, .. }
+            | Self::List { loc, .. }
+            | Self::Case { loc, .. }
+            | Self::Func { loc, .. }
+            | Self::App { loc, .. }
+            | Self::Let { loc, .. } => *loc,
         }
     }
 }
@@ -479,6 +569,12 @@ pub struct LetBinding {
     pub name: String,
     pub r#type: Option<SourceType>,
     pub value: Expr,
+}
+
+impl HasLoc for LetBinding {
+    fn loc(&self) -> Loc {
+        self.loc
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -498,6 +594,7 @@ impl HasLoc for CaseBranch {
 pub enum Pattern {
     Constructor {
         loc: Loc,
+        namespace: Option<Namespace>,
         name: String,
         args: Vec<Pattern>,
     },
@@ -528,6 +625,20 @@ pub enum Pattern {
         loc: Loc,
         elems: Vec<Pattern>,
     },
+}
+
+impl HasLoc for Pattern {
+    fn loc(&self) -> Loc {
+        *match self {
+            Pattern::Constructor { loc, .. } => loc,
+            Pattern::Var { loc, .. } => loc,
+            Pattern::Int { loc, .. } => loc,
+            Pattern::Wildcard { loc } => loc,
+            Pattern::ListNil { loc } => loc,
+            Pattern::ListCons { loc, .. } => loc,
+            Pattern::Tuple { loc, .. } => loc,
+        }
+    }
 }
 
 impl Pattern {
@@ -623,26 +734,34 @@ impl std::fmt::Display for Pattern {
     }
 }
 
-impl HasLoc for Pattern {
-    fn loc(&self) -> Loc {
-        match self {
-            Self::Var { loc, .. } => *loc,
-            Self::Int { loc, .. } => *loc,
-            Self::Constructor { loc, .. } => *loc,
-            Self::Wildcard { loc, .. } => *loc,
-            Self::ListNil { loc } => *loc,
-            Self::ListCons { loc, .. } => *loc,
-            Self::Tuple { loc, .. } => *loc,
-        }
+/// The name of an import, e.g. `myName` in
+///   import ./path/to/file.tl as myName
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Namespace(String);
+
+impl Namespace {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for Namespace {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Display for Namespace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum Var {
-    // TODO: store global variables (i.e. functions) separately.
-    // This makes it easier to know what variables a function is capturing.
     Local(String),
-    Constructor(String),
+    Global(Option<Namespace>, String),
+    Constructor(Option<Namespace>, String),
     Operator(Operator),
 }
 
@@ -653,6 +772,7 @@ pub enum Operator {
     Mul,
     Eq,
     Lt,
+    Chars,
 }
 
 impl Type {
@@ -687,32 +807,5 @@ impl Type {
             t = Type::Func(Box::new((*arg).clone()), Box::new(t))
         }
         t
-    }
-
-    pub fn from_source_type(source_type: &SourceType) -> Self {
-        match source_type {
-            SourceType::Named(_, n) => Self::Named(n.to_string()),
-            SourceType::Func(_, f, x) => {
-                let f = Type::from_source_type(f);
-                let x = Type::from_source_type(x);
-                Self::Func(Box::new(f), Box::new(x))
-            }
-            SourceType::Int(_) => Type::Int,
-            SourceType::Bool(_) => Type::Bool,
-            SourceType::Str(_) => Type::Str,
-            SourceType::Char(_) => Type::Char,
-            SourceType::App { head, args, .. } => {
-                let head = Type::from_source_type(head);
-                let args = args.iter().map(|arg| Type::from_source_type(arg)).collect();
-                Self::App {
-                    head: Box::new(head),
-                    args,
-                }
-            }
-            SourceType::Var(_, v) => Type::Var(v.to_string()),
-            SourceType::Tuple { elems, .. } => {
-                Type::Tuple(elems.into_iter().map(Self::from_source_type).collect())
-            }
-        }
     }
 }

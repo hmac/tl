@@ -95,6 +95,22 @@ impl Vm {
                     stack.push(Value::Bool(x == y));
                     ip += 1;
                 }
+                // Convert the string (top of stack) into a list of characters
+                Instruction::Chars => {
+                    let s = stack.pop().unwrap();
+                    match s {
+                        Value::Str(s) => {
+                            let elems = s.chars().rev();
+                            let mut list = Value::ListNil;
+                            for e in elems {
+                                list = Value::ListCons(Box::new(Value::Char(e)), Box::new(list));
+                            }
+                            stack.push(list);
+                            ip += 1;
+                        }
+                        _ => unreachable!("chars: arg is not a string"),
+                    }
+                }
 
                 Instruction::PushInt(n) => {
                     debug!("push_int({n})");
@@ -111,7 +127,16 @@ impl Vm {
                     stack.push(Value::Char(*c));
                     ip += 1;
                 }
+                Instruction::PushBool(b) => {
+                    debug!("push_bool({b})");
+                    stack.push(Value::Bool(*b));
+                    ip += 1;
+                }
                 Instruction::PushGlobal(v) => {
+                    if self.functions.get(v).is_none() {
+                        dbg!(&self.functions);
+                        dbg!(&v);
+                    }
                     let (func_block_id, args) = self.functions.get(v).unwrap();
                     let val = Value::Func {
                         name: v.to_string(),
@@ -658,7 +683,7 @@ impl std::fmt::Display for Value {
                 } else {
                     write!(f, "({},", elems[0])?;
                     let n = elems.len();
-                    for (i, e) in elems.iter().enumerate() {
+                    for (i, e) in elems.iter().enumerate().skip(1) {
                         if i == n - 1 {
                             write!(f, " {})", e)?;
                         } else {
