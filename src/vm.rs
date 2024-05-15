@@ -683,7 +683,7 @@ impl std::fmt::Display for Value {
                 } else {
                     write!(f, "({},", elems[0])?;
                     let n = elems.len();
-                    for (i, e) in elems.iter().enumerate() {
+                    for (i, e) in elems.iter().enumerate().skip(1) {
                         if i == n - 1 {
                             write!(f, " {})", e)?;
                         } else {
