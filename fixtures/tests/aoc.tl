@@ -208,9 +208,16 @@ read_last_digit : List Char -> Option Int {
   read_last_digit_ None
 }
 
+tail : List a -> List a {
+ l -> case l {
+  [] -> [],
+  [_, ..r] -> r
+ }
+}
+
 read_last_digit_ : Option Int -> List Char -> Option Int {
   n l -> case read_first_digit l {
-   (Some m, r) -> read_last_digit_ (Some m) r,
+   (Some m, r) -> read_last_digit_ (Some m) (tail l),
    (None, []) -> n,
    (None, r) -> read_last_digit_ n r
   }
@@ -240,6 +247,16 @@ input2_small : List String {
 
 result_2_parts : List (Option Int) {
  map (cs -> make_two_digit_number (fst (read_first_digit cs)) (read_last_digit cs)) (map chars input_big)
+}
+
+take : Int -> List a -> List a {
+ n l -> case n {
+  0 -> [],
+  m -> case l {
+   [] -> [],
+   [x, ..r] -> [x, ..take (- m 1) r]
+  }
+ }
 }
 
 result_2 : Option Int {
