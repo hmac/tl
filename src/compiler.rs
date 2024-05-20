@@ -530,8 +530,4 @@ impl Program {
     pub fn get_block(&self, block_id: BlockId) -> &[Instruction] {
         self.blocks[block_id.0].as_slice()
     }
-
-    pub fn len(&self) -> usize {
-        self.blocks.len()
-    }
 }
