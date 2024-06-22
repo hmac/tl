@@ -7,6 +7,7 @@ f : Int -> Int {
 ---
 Error:
 
+fixtures/type_errors/bad_list_pattern.tl:
    3:   x -> case x {
    4:     [] -> 0
           ^^

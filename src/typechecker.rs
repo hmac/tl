@@ -13,7 +13,12 @@ const TYPE_BOOL: Type = Type::Bool;
 
 #[derive(Debug)]
 pub enum Error {
-    TypeAlreadyDefined(Loc, String),
+    TypeAlreadyDefined {
+        name: String,
+        original_path: PathBuf,
+        original_loc: Loc,
+        redefinition_loc: Loc,
+    },
     UnknownType(Loc, GlobalName),
     UnknownVariable(Loc, String),
     UnknownConstructor(Loc, String),
@@ -75,7 +80,9 @@ pub enum Error {
 impl HasLoc for Error {
     fn loc(&self) -> Loc {
         match self {
-            Error::TypeAlreadyDefined(loc, _) => *loc,
+            Error::TypeAlreadyDefined {
+                redefinition_loc, ..
+            } => *redefinition_loc,
             Error::UnknownType(loc, _) => *loc,
             Error::UnknownVariable(loc, _) => *loc,
             Error::UnknownConstructor(loc, _) => *loc,
@@ -122,8 +129,16 @@ impl HasLoc for ErrorWithPath<'_> {
 impl std::fmt::Display for ErrorWithPath<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.error {
-            Error::TypeAlreadyDefined(_, ty) => {
-                write!(f, "the type '{ty}' has already been defined elsewhere")
+            Error::TypeAlreadyDefined {
+                name,
+                original_path,
+                ..
+            } => {
+                write!(
+                    f,
+                    "the type '{name}' has already been defined elsewhere (in {})",
+                    original_path.display()
+                )
             }
             Error::UnknownType(_, ty) => {
                 write!(
@@ -305,11 +320,17 @@ impl Imports {
     }
 }
 
+pub struct DefinedTypeInfo {
+    parameters: Vec<String>,
+    loc: Loc,
+    path: PathBuf,
+}
+
 pub struct Typechecker {
     // constructor name => (type name, location, constructor type)
     constructors: HashMap<GlobalName, (GlobalName, Loc, Type)>,
     // type name => type parameters
-    types: HashMap<GlobalName, Vec<String>>,
+    types: HashMap<GlobalName, DefinedTypeInfo>,
     functions: HashMap<GlobalName, (Loc, Type)>,
     pub imports: Imports,
 }
@@ -318,9 +339,24 @@ impl Typechecker {
     pub fn new() -> Self {
         let mut types = HashMap::new();
         let mut constructors = HashMap::new();
-        types.insert(GlobalName::builtin("List"), vec!["a".to_string()]);
+        let builtin_path: PathBuf = "builtin".into();
+        types.insert(
+            GlobalName::builtin("List"),
+            DefinedTypeInfo {
+                parameters: vec!["a".to_string()],
+                loc: (0, 0),
+                path: builtin_path.clone(),
+            },
+        );
 
-        types.insert(GlobalName::builtin("Bool"), vec![]);
+        types.insert(
+            GlobalName::builtin("Bool"),
+            DefinedTypeInfo {
+                parameters: vec![],
+                loc: (0, 0),
+                path: builtin_path.clone(),
+            },
+        );
         // Insert the constructors for Bool, which is a built-in type.
         // The locations are fake.
         constructors.insert(
@@ -351,12 +387,24 @@ impl Typechecker {
         let type_name = GlobalName::named(path, name);
 
         // Check that type name is not already in use
-        if self.types.contains_key(&type_name) {
-            return Err(Error::TypeAlreadyDefined(loc, name.to_string()));
+        if let Some(type_info) = self.types.get(&type_name) {
+            return Err(Error::TypeAlreadyDefined {
+                name: name.to_string(),
+                original_loc: type_info.loc,
+                redefinition_loc: loc,
+                original_path: type_info.path.clone(),
+            });
         }
 
         // Check that constructors are well-formed
-        self.types.insert(type_name.clone(), params.to_owned());
+        self.types.insert(
+            type_name.clone(),
+            DefinedTypeInfo {
+                parameters: params.to_owned(),
+                loc,
+                path: path.to_path_buf(),
+            },
+        );
         for ctor in constructors {
             let ctor_type = self.make_constructor_type(loc, path, None, &name, params, &ctor)?;
             let ctor_name = GlobalName::named(path, &ctor.name);
@@ -1107,8 +1155,6 @@ impl Typechecker {
             } => {
                 // Check the constructor result type matches `expected_type`
                 let ctor_ty = {
-                    // We currently assume that the constructor is defined in the same file (or is
-                    // a builtin)
                     let ctor_name = match name.as_str() {
                         "True" | "False" => GlobalName::builtin(name),
                         _ => self.imports.lookup(*loc, path, namespace, name)?,
@@ -1310,6 +1356,10 @@ impl Typechecker {
                     Box::new(Type::Str),
                     Box::new(self.make_list_type(Type::Char)),
                 )),
+                Operator::CharAt => Ok(Type::Func(
+                    Box::new(Type::Int),
+                    Box::new(Type::Func(Box::new(Type::Str), Box::new(Type::Char))),
+                )),
             },
         }
     }
@@ -1343,16 +1393,26 @@ impl Typechecker {
                 todo!()
             }
             Pattern::Constructor {
-                name, args, loc, ..
+                name,
+                args,
+                loc,
+                namespace,
+                ..
             } => {
                 // Lookup the type of the constructor and check it matches the target type.
-                // Assume the type is defined in this file
-                let ctor_name = GlobalName::named(path, name);
-                let ctor_ty = self.lookup_constructor(type_variables, &ctor_name, *loc)?;
-                self.assert_type_eq(type_variables, &target_type, &ctor_ty, *loc)?;
+                let ctor_name = match name.as_str() {
+                    "True" | "False" => GlobalName::builtin(name),
+                    _ => self.imports.lookup(*loc, path, namespace, name)?,
+                };
+
+                let ctor_type = self.lookup_constructor(type_variables, &ctor_name, *loc)?;
+
+                // func_args always returns a non-empty vector, so this unwrap is safe
+                let ctor_result_type = *ctor_type.func_args().back().unwrap();
+                self.assert_type_eq(type_variables, &target_type, &ctor_result_type, *loc)?;
 
                 // Check the constructor has the right number of args
-                let ctor_ty_args = ctor_ty.func_args();
+                let ctor_ty_args = ctor_type.func_args();
                 let num_args_in_ctor_type = ctor_ty_args.len() - 1; // last elem is the result type
                 if num_args_in_ctor_type != args.len() {
                     return Err(Error::CaseBranchArgNumberMismatch {
@@ -1450,7 +1510,7 @@ impl Typechecker {
         loc: Loc,
     ) -> Result<Type, Error> {
         match self.constructors.get(name) {
-            None => Err(Error::UnknownConstructor(loc, name.to_string())),
+            None => Err(Error::UnknownConstructor(loc, dbg!(name).to_string())),
             Some((_, _, ty)) => {
                 // This constructor type may have type variables that we must instantiate.
                 let (ty, vars) = self.generate_fresh_type_variables(ty.clone(), type_variables);
@@ -1737,8 +1797,8 @@ impl Typechecker {
                     // No need to check builtin types.
                 }
                 GlobalName::Named(path, _) => match self.types.get(type_name) {
-                    Some(type_params) => {
-                        self.check_type(path, ctor_type, *loc, type_params)?;
+                    Some(type_info) => {
+                        self.check_type(path, ctor_type, *loc, &type_info.parameters)?;
                     }
                     None => {
                         return Err(Error::UnknownType(*loc, type_name.clone()));

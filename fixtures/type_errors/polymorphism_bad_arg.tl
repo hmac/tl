@@ -8,6 +8,7 @@ main : Int {
 ---
 Error:
 
+fixtures/type_errors/polymorphism_bad_arg.tl:
    5: main : Int {
    6:   apply (x -> + x 1) True
                            ^^^^

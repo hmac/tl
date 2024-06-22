@@ -80,6 +80,11 @@ impl<'a> Runner<'a> {
     fn load_file_source(&mut self, path: &Path, source: String) -> Result<(), Error> {
         let path = path.canonicalize()?;
 
+        // If we've already loaded this file, skip it.
+        if self.files.contains_key(&path) {
+            return Ok(());
+        }
+
         let mut parser = parser::Parser::new(source.clone());
         match parser.parse() {
             Ok(ast) => {
@@ -100,7 +105,7 @@ impl<'a> Runner<'a> {
                                     Err(e) => {
                                         writeln!(self.output, "Error:\n")?;
                                         let error = ImportPathDoesNotExist { loc: *path_loc };
-                                        ast::print_error(&mut self.output, &source, error);
+                                        ast::print_error(&mut self.output, &source, error, None);
                                         Err(e)
                                     }
                                 }?,
@@ -132,13 +137,19 @@ impl<'a> Runner<'a> {
                                 *loc,
                             ) {
                                 writeln!(self.output, "Error:\n")?;
-                                ast::print_error(&mut self.output, &source, error);
+                                ast::print_error(
+                                    &mut self.output,
+                                    &source,
+                                    error.with_path(Some(&path)),
+                                    Some(&path),
+                                );
                                 return Err(Error::Type);
                             }
                         }
                         _ => {}
                     }
                 }
+
                 // Register function signatures with the typechecker
                 for decl in &ast {
                     match decl {
@@ -153,6 +164,7 @@ impl<'a> Runner<'a> {
                                     &mut self.output,
                                     &source,
                                     error.with_path(Some(&path)),
+                                    Some(&path),
                                 );
                                 return Err(Error::Type);
                             }
@@ -163,7 +175,7 @@ impl<'a> Runner<'a> {
 
                 if let Err(error) = self.typechecker.check_all_types() {
                     writeln!(self.output, "Error:\n")?;
-                    ast::print_error(&mut self.output, &parser.into_input(), error);
+                    ast::print_error(&mut self.output, &parser.into_input(), error, Some(&path));
                     return Err(Error::Type);
                 }
 
@@ -177,6 +189,7 @@ impl<'a> Runner<'a> {
                                     &mut self.output,
                                     &parser.into_input(),
                                     error.with_path(Some(&path)),
+                                    Some(&path),
                                 );
                                 return Err(Error::Type);
                             }
@@ -188,7 +201,12 @@ impl<'a> Runner<'a> {
                                 &ast::SourceType::Bool((0, 0)),
                             ) {
                                 writeln!(self.output, "Error in test {name}:\n")?;
-                                ast::print_error(&mut self.output, &parser.into_input(), error);
+                                ast::print_error(
+                                    &mut self.output,
+                                    &parser.into_input(),
+                                    error,
+                                    Some(&path),
+                                );
                                 return Err(Error::Type);
                             }
                         }
@@ -204,13 +222,13 @@ impl<'a> Runner<'a> {
             }
             Err(error) => {
                 writeln!(self.output, "Error:\n")?;
-                ast::print_error(&mut self.output, &parser.into_input(), error);
+                ast::print_error(&mut self.output, &parser.into_input(), error, Some(&path));
                 Err(Error::Parse)
             }
         }
     }
 
-    fn compile(&self) -> Result<compiler::Compiler, Error> {
+    pub fn compile(&self) -> Result<compiler::Compiler, Error> {
         let mut compiler = compiler::Compiler::new(self.typechecker.imports.clone());
 
         // It doesn't matter what order we compile the functions in

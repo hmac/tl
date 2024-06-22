@@ -8,6 +8,7 @@ main : Bool { f False }
 ---
 Error:
 
+fixtures/type_errors/missing_case_pattern_1.tl:
    1: f : Bool -> Bool {
    2:   x -> case x {
              ^

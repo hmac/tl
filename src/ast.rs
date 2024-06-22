@@ -64,7 +64,12 @@ fn string_index_to_line_col_number(
 //     ^
 // expected '-'
 //
-pub fn print_error<E: Display + HasLoc, W: std::io::Write>(writer: &mut W, orig: &str, error: E) {
+pub fn print_error<E: Display + HasLoc, W: std::io::Write>(
+    writer: &mut W,
+    orig: &str,
+    error: E,
+    path: Option<&Path>,
+) {
     let (start, end) = error.loc();
     let newlines = calculate_lines(orig);
     let (start_line, start_col) = string_index_to_line_col_number(start, &newlines);
@@ -77,6 +82,20 @@ pub fn print_error<E: Display + HasLoc, W: std::io::Write>(writer: &mut W, orig:
     if end_line > start_line {
         // end_line = start_line;
         end_col = start_col; // TODO
+    }
+
+    // Print the path of the file where the error occurred, if we have it
+    if let Some(path) = path {
+        // Print the path relative to the current directory if possible.
+        // This is less verbose and makes the test fixtures machine-agnostic.
+        if let Some(rel_path) = std::env::current_dir()
+            .ok()
+            .and_then(|cd| path.strip_prefix(cd).ok())
+        {
+            writeln!(writer, "{}:", rel_path.display()).unwrap();
+        } else {
+            writeln!(writer, "{}:", path.display()).unwrap();
+        }
     }
 
     // Print the previous line, if it exists
@@ -773,6 +792,7 @@ pub enum Operator {
     Eq,
     Lt,
     Chars,
+    CharAt,
 }
 
 impl Type {

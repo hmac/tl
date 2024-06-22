@@ -7,6 +7,7 @@ f : List Bool -> Int {
 ---
 Error:
 
+fixtures/type_errors/bad_list_element_3.tl:
    3:   x -> case x {
    4:     [True, 1] -> 0,
                  ^

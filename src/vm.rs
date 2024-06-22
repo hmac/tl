@@ -40,6 +40,9 @@ impl Vm {
         let mut current_function_block_id = block_id;
 
         loop {
+            if ip >= block.len() {
+                dbg!(ip, &block, &stack, &frames);
+            }
             let instruction = &block[ip];
             debug!(
                 "({}) {ip}: {:?} {} {:?}",
@@ -111,6 +114,23 @@ impl Vm {
                         _ => unreachable!("chars: arg is not a string"),
                     }
                 }
+                // Return the character at a specific index in the string.
+                // If n is out of range, it loops around, so always returns a character.
+                Instruction::CharAt => {
+                    let index = stack.pop().unwrap();
+                    let s = stack.pop().unwrap();
+                    match s {
+                        Value::Str(s) => match index {
+                            Value::Int(n) => {
+                                let char = s.chars().cycle().nth(n as usize).unwrap();
+                                stack.push(Value::Char(char));
+                                ip += 1;
+                            }
+                            _ => unreachable!("char_at: first arg is not an int"),
+                        },
+                        _ => unreachable!("char_at: second arg is not a string"),
+                    }
+                }
 
                 Instruction::PushInt(n) => {
                     debug!("push_int({n})");
@@ -160,6 +180,12 @@ impl Vm {
                     };
                     let val_index = frame_index + v;
                     debug!("push_var({v}): frame_index={frame_index} val_index={val_index}");
+                    if stack.len() <= frame_index + v {
+                        dbg!(current_function_block_id);
+                        dbg!(block_id);
+                        dbg!(&frames);
+                        dbg!(&stack);
+                    }
                     let val = stack[frame_index + v].clone();
 
                     stack.push(val);
@@ -391,20 +417,15 @@ impl Vm {
                     // If there's a match, jump to the corresponding location
                     let target = stack.pop().expect("case: empty stack");
                     match eval_case(&target, &branches) {
-                        Some((new_block_id, bindings)) => {
-                            debug!("case: {bindings:?}");
+                        Some((jump_amount, bindings)) => {
+                            debug!("case: {target:?} {bindings:?}");
                             // Push any values bound by the pattern
                             for v in bindings {
                                 stack.push(v.clone());
                             }
-                            // Jump to the branch
-                            // We're jumping to a new block but not calling a function, so we don't
-                            // push a new stack frame but we need to update the current one to
-                            // record our new block id.
-                            block_id = new_block_id;
 
-                            block = self.prog.get_block(new_block_id);
-                            ip = 0;
+                            // Jump forward to the branch
+                            ip += jump_amount;
                         }
                         None => {
                             // TODO: flesh out this error
@@ -412,12 +433,16 @@ impl Vm {
                         }
                     }
                 }
+                Instruction::Jump(amount) => {
+                    debug!("jmp {amount}");
+                    ip += amount;
+                }
                 Instruction::Ret => {
                     let result = stack.pop().expect("ret: empty stack");
                     if let Some((caller_func_block_id, caller_block_id, caller_addr, frame_index)) =
                         frames.pop()
                     {
-                        debug!("ret caller_func_block_id={}, caller_block_id={} caller_addr={caller_addr} frame_index={frame_index} stack={}", caller_func_block_id.0, caller_block_id.0, display_value_list(&stack));
+                        debug!("ret caller_func_block_id={}, caller_block_id={} caller_addr={caller_addr} frame_index={frame_index} stack={} result={result}", caller_func_block_id.0, caller_block_id.0, display_value_list(&stack));
                         stack.truncate(frame_index);
                         stack.push(result);
 
@@ -430,19 +455,31 @@ impl Vm {
                         return Ok(result);
                     }
                 }
+                Instruction::Shift(n) => {
+                    let result = stack.pop().expect("shift: empty stack");
+                    if stack.len() < *n {
+                        panic!("shift({n}): stack too small ({})", stack.len())
+                    }
+                    for _ in 0..*n {
+                        stack.pop().unwrap();
+                    }
+                    stack.push(result);
+                    ip += 1
+                }
             }
         }
     }
 }
 
+/// Return the jump amount and new bound vars for the case instruction, if any.
 fn eval_case<'a>(
     target: &'a Value,
-    branches: &[(Pattern, BlockId)],
-) -> Option<(BlockId, Vec<&'a Value>)> {
-    for (pattern, block_id) in branches {
+    branches: &[(Pattern, usize)],
+) -> Option<(usize, Vec<&'a Value>)> {
+    for (pattern, jump_amount) in branches {
         match match_pattern(target, pattern) {
             Some(bound_values) => {
-                return Some((*block_id, bound_values));
+                return Some((*jump_amount, bound_values));
             }
             None => {}
         }

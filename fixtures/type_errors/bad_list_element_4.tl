@@ -7,6 +7,7 @@ f : List (List Int) -> Int {
 ---
 Error:
 
+fixtures/type_errors/bad_list_element_4.tl:
    3:   x -> case x {
    4:     [[1], [[2]]] -> 0,
                  ^^^

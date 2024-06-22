@@ -1,3 +1,5 @@
+use ./option.tl as opt
+
 map : (a -> b) -> List a -> List b {
   f l -> case l {
     [] -> [],
@@ -81,44 +83,42 @@ test append {
   == (append [1, 2, 3] [4, 5, 6]) [1, 2, 3, 4, 5, 6]
 }
 
-type Option a { None, Some a }
-
-first : List a -> Option a {
+first : List a -> opt.Option a {
   l -> case l {
-    [] -> None,
-    [x, .._] -> Some x,
+    [] -> opt.None,
+    [x, .._] -> opt.Some x,
   }
 }
 
-test first { == (first [1, 2]) (Some 1) }
-test first_empty { == (first []) None }
+test first { == (first [1, 2]) (opt.Some 1) }
+test first_empty { == (first []) opt.None }
 
-last : List a -> Option a {
+last : List a -> opt.Option a {
   l -> case l {
-    [] -> None,
-    [x] -> Some x,
+    [] -> opt.None,
+    [x] -> opt.Some x,
     [_, ..r] -> last r,
   }
 }
 
-test last { == (last [1, 2]) (Some 2) }
-test last_one { == (last [1]) (Some 1) }
-test last_empty { == (last []) None }
+test last { == (last [1, 2]) (opt.Some 2) }
+test last_one { == (last [1]) (opt.Some 1) }
+test last_empty { == (last []) opt.None }
 
-tail : List a -> Option (List a) {
+tail : List a -> opt.Option (List a) {
   l -> case l {
-    [] -> None,
-    [x, ..rest] -> Some rest,
+    [] -> opt.None,
+    [x, ..rest] -> opt.Some rest,
   }
 }
 
-test tail { == (tail [1, 2, 3]) (Some [2, 3]) }
-test tail_empty { == (tail []) None }
+test tail { == (tail [1, 2, 3]) (opt.Some [2, 3]) }
+test tail_empty { == (tail []) opt.None }
 
-init : List a -> Option (List a) {
+init : List a -> opt.Option (List a) {
   l -> case l {
-    [] -> None,
-    [x, ..xs] -> Some (init_helper x xs)
+    [] -> opt.None,
+    [x, ..xs] -> opt.Some (init_helper x xs)
   }
 }
 
@@ -129,9 +129,9 @@ init_helper : a -> List a -> List a {
   }
 }
 
-test init { == (init [1, 2, 3]) (Some [1, 2]) }
-test init_empty { == (init []) None }
-test init_single { == (init [1]) (Some []) }
+test init { == (init [1, 2, 3]) (opt.Some [1, 2]) }
+test init_empty { == (init []) opt.None }
+test init_single { == (init [1]) (opt.Some []) }
 
 single : a -> List a {
   x -> [x]

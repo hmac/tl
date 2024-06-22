@@ -20,6 +20,7 @@ main : Int {
 ---
 Error:
 
+fixtures/type_errors/temp.tl:
   17: main : Int {
   18:   length (convert (Cons2 1 Nil2))
                          ^^^^^

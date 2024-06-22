@@ -1,5 +1,5 @@
 use crate::ast::{
-    CaseBranch, Decl, Expr, HasLoc, LetBinding, Loc, Operator, Pattern, SourceType,
+    CaseBranch, Decl, Expr, HasLoc, LetBinding, Loc, Namespace, Operator, Pattern, SourceType,
     TypeConstructor, Var,
 };
 use std::{collections::VecDeque, path::PathBuf};
@@ -762,8 +762,14 @@ impl Parser {
                 }
             }
 
+            // TODO: namespace these special functions?
+            // Or prevent the user from defining their own functions with the same name.
             if s == "chars" {
                 return Ok(Var::Operator(Operator::Chars));
+            }
+
+            if s == "char_at" {
+                return Ok(Var::Operator(Operator::CharAt));
             }
 
             return Ok(Var::Local(s));
@@ -918,14 +924,7 @@ impl Parser {
                     // We're parsing a namespaced constructor
                     self.eat(".")?;
                     let namespace = Some(name.into());
-                    let name = self.parse_upper_ident()?;
-                    self.trim();
-                    return Ok(Pattern::Constructor {
-                        loc: (loc, self.loc),
-                        namespace,
-                        name,
-                        args: vec![],
-                    });
+                    return self.parse_ctor_pattern(namespace, loc);
                 } else {
                     return Ok(Pattern::Var {
                         loc: (loc, self.loc),
@@ -990,7 +989,14 @@ impl Parser {
             return Ok(r);
         }
 
-        let loc = self.loc;
+        self.parse_ctor_pattern(None, self.loc)
+    }
+
+    fn parse_ctor_pattern(
+        &mut self,
+        namespace: Option<Namespace>,
+        loc: usize,
+    ) -> Result<Pattern, Error> {
         let name = self.parse_upper_ident()?;
         self.trim();
         let mut args = vec![];
@@ -1008,7 +1014,7 @@ impl Parser {
         }
         Ok(Pattern::Constructor {
             loc: (loc, self.loc),
-            namespace: None,
+            namespace,
             name,
             args,
         })

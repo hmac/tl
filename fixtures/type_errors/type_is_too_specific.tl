@@ -6,6 +6,7 @@ main : a -> a {
 ---
 Error:
 
+fixtures/type_errors/type_is_too_specific.tl:
    3: main : a -> a {
    4:   _ -> True
              ^^^^

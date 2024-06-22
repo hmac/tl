@@ -58,7 +58,7 @@ impl Compiler {
             }
             e => (self.compile_expr(path, name, e, Vec::new(), true)?, vec![]),
         };
-        let id = self.program.add_block(ins);
+        let id = self.program.add_block(name, ins);
         let name = GlobalName::named(path, name);
         self.functions.insert(name.to_string(), (id, args));
         Ok(())
@@ -111,6 +111,7 @@ impl Compiler {
                     Operator::Lt => "<",
                     Operator::Eq => "==",
                     Operator::Chars => "chars",
+                    Operator::CharAt => "char_at",
                 };
                 ins.push(Instruction::PushGlobal(format!("builtin:{op_name}")));
             }
@@ -175,21 +176,78 @@ impl Compiler {
                     locals.clone(),
                     false,
                 )?);
-                // Compile each branch, and determine their start locations
+                // Case expressions are compiled as a Case instruction followed by instruction
+                // sequences for each branch. At the end of each branch is a jump to the instruction
+                // sequence for the parent expression of the branch. For example, consider this function:
+
+                // f : Int { let n = case + 1 2 { x -> + x 2, _ -> 5 } { + n 1 }  }
+
+                // This is compiled to
+
+                // 0: push_int 2                       ; target
+                // 1: push_int 1
+                // 2: add
+                // 3: case { int(3) -> 1, wild -> 5 }  ; case instruction - relative jumps
+                // 4: push_var 0                       ; branch 1 (x)
+                // 5: push_int 2
+                // 6: add
+                // 7: jmp 3                            ; relative jump
+                // 8: push_int 5                       ; branch 2 (_)
+                // 9: jmp 1                            ; relative jump
+                // 10: push_var 0                      ; + n 1
+                // 11: push_int 1
+                // 12: add
+                // 13: ret
+
+                // We must ensure that, when leaving the case, we do not leave any local branch variables
+                // on the stack. This is because the number of local variables introduced may differ between
+                // branches and so later code will not have a consistent view of the stack and we will get
+                // our variables muddled.
+                // To deal with this, at the end of a branch and just before jumping, we remove from the stack
+                // all variables pushed in the branch, leaving just the return value on top.
+                // We add a specific instruction for this, called SHIFT.
+                // SHIFT N removes elements 1 to N-1 from the stack, leaving element 0 on top.
+                // At the end of a branch, we must SHIFT each variable that was bound by the branch pattern.
+
                 let mut pattern_locs = vec![];
+                let mut branch_instruction_sequences: Vec<Vec<Instruction>> = vec![];
                 for branch in branches {
                     let mut locals = locals.clone();
-                    // TODO: add pattern bindings to locals
-                    for var in branch.pattern.ordered_vars() {
+                    let pattern_vars = branch.pattern.ordered_vars();
+                    let pattern_var_len = pattern_vars.len();
+                    for var in pattern_vars {
                         locals.push(var);
                     }
-                    let branch_ins =
-                        self.compile_expr(path, func_name, &branch.rhs, locals, is_leaf)?;
-                    let branch_id = self.program.add_block(branch_ins);
-                    pattern_locs.push((branch.pattern.clone(), branch_id));
+                    let mut branch_ins =
+                        self.compile_expr(path, func_name, &branch.rhs, locals, false)?;
+                    // SHIFT the branch pattern-bound locals off the stack before jumping
+                    branch_ins.push(Instruction::Shift(pattern_var_len));
+                    let case_relative_jump = branch_instruction_sequences
+                        .iter()
+                        .map(|ins| ins.len() + 1) // + 1 to account for the final jump instruction, not yet added
+                        .sum::<usize>()
+                        + 1;
+                    pattern_locs.push((branch.pattern.clone(), case_relative_jump));
+                    branch_instruction_sequences.push(branch_ins);
+                }
+
+                // Add a relative jump at the end of each branch instruction sequence which jumps to the
+                // instruction after the last branch.
+                // This is equal to the summed length of all the subsequent branch instruction sequences.
+
+                let sequence_lengths: Vec<usize> = branch_instruction_sequences
+                    .iter()
+                    .map(|ins| ins.len() + 1) // + 1 to account for the final jump instruction, not yet added
+                    .collect();
+                for (i, seq) in branch_instruction_sequences.iter_mut().enumerate() {
+                    let amount: usize = sequence_lengths.iter().skip(i + 1).sum::<usize>() + 1;
+                    seq.push(Instruction::Jump(amount));
                 }
                 let case = Instruction::Case(pattern_locs);
                 ins.push(case);
+                for mut seq in branch_instruction_sequences {
+                    ins.append(&mut seq);
+                }
             }
             Expr::Func { args, body, .. } => {
                 // Lift the function, then apply any captured variables
@@ -296,6 +354,7 @@ impl Compiler {
                             Operator::Lt => Instruction::LtInt,
                             Operator::Eq => Instruction::Eq,
                             Operator::Chars => Instruction::Chars,
+                            Operator::CharAt => Instruction::CharAt,
                         });
                     }
                     h => todo!("{:?}", h),
@@ -357,7 +416,7 @@ impl Compiler {
             },
             true,
         )?;
-        let block_id = self.program.add_block(ins);
+        let block_id = self.program.add_block(&name, ins);
         self.functions
             .insert(name.clone(), (block_id, body_locals.to_vec()));
         Ok(name)
@@ -479,6 +538,7 @@ pub enum Instruction {
     LtInt,
     Eq,
     Chars,
+    CharAt,
     PushInt(i64),
     PushStr(String),
     PushChar(char),
@@ -502,8 +562,44 @@ pub enum Instruction {
     // After that, the next elements on the stack should be the arguments.
     Call,
     TailCall,
-    Case(Vec<(Pattern, BlockId)>),
+    // Map each pattern to a relative jump
+    Case(Vec<(Pattern, usize)>),
+    // A relative jump forward in the instruction sequence.
+    Jump(usize),
+    // Shift(N) shifts the top stack element backwards, removing n elements behind it.
+    // This is used when exiting the branch of a case expression to remove any locals bound in the branch.
+    Shift(usize),
     Ret,
+}
+
+impl std::fmt::Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Instruction::AddInt => write!(f, "add"),
+            Instruction::SubInt => write!(f, "sub"),
+            Instruction::MulInt => write!(f, "mul"),
+            Instruction::LtInt => write!(f, "lt"),
+            Instruction::Eq => write!(f, "eq"),
+            Instruction::Chars => write!(f, "chars"),
+            Instruction::CharAt => write!(f, "char_at"),
+            Instruction::PushInt(i) => write!(f, "push_int {}", i),
+            Instruction::PushStr(s) => write!(f, "push_str {}", s),
+            Instruction::PushChar(c) => write!(f, "push_char {}", c),
+            Instruction::PushBool(b) => write!(f, "push_bool {}", b),
+            Instruction::PushVar(v) => write!(f, "push_var {}", v),
+            Instruction::PushGlobal(g) => write!(f, "push_global {}", g),
+            Instruction::PushCtor(c) => write!(f, "push_ctor {}", c),
+            Instruction::MakeList(l) => write!(f, "make_list {}", l),
+            Instruction::MakeTuple(t) => write!(f, "make_tuple {}", t),
+            Instruction::Ctor(name, num_args) => write!(f, "ctor {:?} {}", name, num_args),
+            Instruction::Call => write!(f, "call"),
+            Instruction::TailCall => write!(f, "tail_call"),
+            Instruction::Case(b) => write!(f, "case {:?}", b),
+            Instruction::Jump(n) => write!(f, "jmp {n}"),
+            Instruction::Ret => write!(f, "ret"),
+            Instruction::Shift(n) => write!(f, "shift {n}"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -513,8 +609,14 @@ pub enum Error {}
 pub struct BlockId(pub usize);
 
 #[derive(Debug)]
+pub struct Block {
+    name: String, // for debugging, not necessarily unique
+    instructions: Vec<Instruction>,
+}
+
+#[derive(Debug)]
 pub struct Program {
-    blocks: Vec<Vec<Instruction>>,
+    blocks: Vec<Block>,
 }
 
 impl Program {
@@ -522,12 +624,27 @@ impl Program {
         Self { blocks: vec![] }
     }
 
-    pub fn add_block(&mut self, block: Vec<Instruction>) -> BlockId {
-        self.blocks.push(block);
+    pub fn add_block(&mut self, name: &str, instructions: Vec<Instruction>) -> BlockId {
+        self.blocks.push(Block {
+            name: name.to_string(),
+            instructions,
+        });
         BlockId(self.blocks.len() - 1)
     }
 
     pub fn get_block(&self, block_id: BlockId) -> &[Instruction] {
-        self.blocks[block_id.0].as_slice()
+        self.blocks[block_id.0].instructions.as_slice()
+    }
+}
+
+impl std::fmt::Display for Program {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (block_id, block) in self.blocks.iter().enumerate() {
+            writeln!(f, "\n{}:", block.name)?;
+            for (ins_id, ins) in block.instructions.iter().enumerate() {
+                writeln!(f, "{:>3} {:>3}: {}", block_id, ins_id, ins)?;
+            }
+        }
+        Ok(())
     }
 }

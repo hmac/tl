@@ -5,6 +5,7 @@ main : (a -> b) -> b -> c -> c {
 ---
 Error:
 
+fixtures/type_errors/too_few_arguments.tl:
    2: main : (a -> b) -> b -> c -> c {
    3:   f x -> x
                ^

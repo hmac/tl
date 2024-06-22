@@ -13,6 +13,7 @@ bar : Int { foo 2 3 }
 ---
 Error:
 
+fixtures/type_errors/too_many_args_in_application.tl:
   11: 
   12: bar : Int { foo 2 3 }
                   ^^^^^
