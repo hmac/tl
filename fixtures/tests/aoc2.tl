@@ -1,6 +1,9 @@
-use ./option.tl as opt
-use ./list.tl as list
+use ../lib/option.tl as opt
+use ../lib/list.tl as list
 use ./aoc2_input.tl as aoc2_input
+use ../lib/bool.tl as bool
+use ../lib/function.tl as fn
+use ../lib/tuple.tl as tuple
 
 test char_at_0 {
   == 'a' (char_at 0 "abc")
@@ -56,6 +59,16 @@ test parse_game_id {
     opt.None -> opt.None
   } {
     == (opt.Some (1, 6)) x
+  }
+}
+
+firstByOpt : (a -> opt.Option b) -> List a -> opt.Option (a, b) {
+  f xs -> case xs {
+    [] -> opt.None,
+    [x, ..z] -> case f x {
+      opt.Some r -> opt.Some (x, r),
+      opt.None -> firstByOpt f z
+    }
   }
 }
 
@@ -139,7 +152,7 @@ test parse_games {
 
 // (red, green, blue)
 games_breach_cube_limit : (Int, Int, Int) -> List (List (Colour, Int)) -> Bool {
-  lim games -> any (game_breaches_limit lim) games
+  lim games -> list.any (game_breaches_limit lim) games
 }
 
 game_breaches_limit : (Int, Int, Int) -> List (Colour, Int) -> Bool {
@@ -180,41 +193,11 @@ test games_breach_cube_limit {
   ])
 }
 
-filter : (a -> Bool) -> List a -> List a {
-  p xs -> case xs {
-    [] -> [],
-    [x, ..r] -> case p x {
-      True -> [x, ..filter p r],
-      False -> filter p r
-    }
-  }
-}
-
-sequenceOpt : List (opt.Option a) -> opt.Option (List a) {
-  xs -> case xs {
-    [] -> opt.Some [],
-    [x, ..r] -> case x {
-      opt.Some y -> case sequenceOpt r {
-        opt.None -> opt.None,
-        opt.Some zs -> opt.Some [y, ..zs]
-      }
-    }
-  }
-}
-
-uncurry: (a -> b -> c) -> (a, b) -> c {
-  f t -> case t {
-    (x, y) -> f x y
-  }
-}
-
-not : Bool -> Bool { b -> case b { True -> False, False -> True } }
-
 possible_games : List String -> opt.Option (List Int) {
   let possible : Int -> List (List (Colour, Int)) -> Bool
-               = id games -> not (games_breach_cube_limit (12, 13, 14) games) {
-    game_strings -> let parsed = sequenceOpt (list.map parse_games game_strings),
-                        filterAndGetId : List (Int, List (List (Colour, Int))) -> List Int = games -> list.map fst (filter (uncurry possible) games) {
+               = id games -> bool.not (games_breach_cube_limit (12, 13, 14) games) {
+    game_strings -> let parsed = list.seq_opt (list.map parse_games game_strings),
+                        filterAndGetId : List (Int, List (List (Colour, Int))) -> List Int = games -> list.map tuple.fst (list.filter (fn.uncurry possible) games) {
                       opt.map filterAndGetId parsed
                     }
   }
@@ -236,41 +219,8 @@ test answer_small {
   == answer_small (opt.Some 8)
 }
 
-any : (a -> Bool) -> List a -> Bool {
-  f xs -> case xs {
-    [] -> False,
-    [x, ..r] -> case f x {
-      True -> True,
-      False -> any f r
-    }
-  }
-}
-
-
-first : (a -> opt.Option b) -> List a -> opt.Option (a, b) {
-  f xs -> case xs {
-    [] -> opt.None,
-    [x, ..z] -> case f x {
-      opt.Some r -> opt.Some (x, r),
-      opt.None -> first f z
-    }
-  }
-}
-
-snd : (a, b) -> b {
-  t -> case t { (x, y) -> y }
-}
-
-fst : (a, b) -> a {
-  t -> case t { (x, y) -> x }
-}
-
-mapFst : (a -> b) -> (a, c) -> (b, c) {
-  f t -> case t { (x, y) -> (f x, y) }
-}
-
 parse_colour : Int -> String -> opt.Option (Colour, Int) {
-  n s -> opt.map (mapFst snd) (first (t -> parse_word n s (fst t)) [("red", Red), ("green", Green), ("blue", Blue)])
+  n s -> opt.map (tuple.mapFst tuple.snd) (firstByOpt (t -> parse_word n s (tuple.fst t)) [("red", Red), ("green", Green), ("blue", Blue)])
 }
 
 test parse_colour {

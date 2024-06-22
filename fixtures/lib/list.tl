@@ -49,14 +49,12 @@ test zip_with {
   == (zip_with (x y -> + x y) [1, 2, 3] [4, 5, 6]) [5, 7, 9]
 }
 
-type Pair a b { Pair a b }
-
-zip : List a -> List b -> List (Pair a b) {
-  ls rs -> zip_with (x y -> Pair x y) ls rs
+zip : List a -> List b -> List (a, b) {
+  ls rs -> zip_with (x y -> (x, y)) ls rs
 }
 
 test zip {
-  == (zip [1, 2, 3] [4, 5, 6]) [Pair 1 4, Pair 2 5, Pair 3 6]
+  == (zip [1, 2, 3] [4, 5, 6]) [(1, 4), (2, 5), (3, 6)]
 }
 
 len : List a -> Int { len_helper 0 }
@@ -172,19 +170,19 @@ test intersperse {
   == (intersperse 9 [1, 2, 3]) [1, 9, 2, 9, 3]
 }
 
-unzip : List (Pair a b) -> Pair (List a) (List b) {
-  let f : Pair a b -> Pair (List a) (List b) -> Pair (List a) (List b) =
+unzip : List (a, b) -> (List a, List b) {
+  let f : (a, b) -> (List a, List b) -> (List a, List b) =
     ab asbs -> case ab {
-      Pair a b -> case asbs {
-        Pair as bs -> Pair [a, ..as] [b, ..bs]
+      (a, b) -> case asbs {
+        (as, bs) -> ([a, ..as], [b, ..bs])
       }
     }
-  { foldr f (Pair [] []) }
+  { foldr f ([], []) }
 }
 
 
-test_unzip_single { == (unzip [Pair 1 2]) (Pair [1] [2]) }
-test_unzip { == (unzip [Pair 1 2, Pair 3 4]) (Pair [1, 3] [2, 4]) }
+test_unzip_single { == (unzip [(1, 2)]) ([1], [2]) }
+test_unzip { == (unzip [(1, 2), (3, 4)]) ([1, 3], [2, 4]) }
 
 foldr : (a -> b -> b) -> b -> List a -> b {
   f z l -> case l {
@@ -219,11 +217,11 @@ permutations : List a -> List (List a) {
 // interleave_ and perms are recursive, so can't be let-bound (yet).
 id : a -> a { x -> x }
 
-interleave_ : a -> List a -> (List a -> b) -> List a -> List b -> Pair (List a) (List b) {
+interleave_ : a -> List a -> (List a -> b) -> List a -> List b -> (List a, List b) {
   t ts f l r -> case l {
-    [] -> Pair ts r,
+    [] -> (ts, r),
     [y, ..ys] -> case interleave_ t ts (x -> f [y, ..x]) ys r {
-      Pair us zs -> Pair [y, ..us] [f [t, y, ..us], ..zs]
+      (us, zs) -> ([y, ..us], [f [t, y, ..us], ..zs])
     }
   }
 }
@@ -234,7 +232,7 @@ perms : List a -> List a -> List (List a) {
     [t, ..ts] ->
       let
         interleave : List a -> List (List a) -> List (List a)
-          = xs r -> case interleave_ t ts id xs r { Pair _ zs -> zs },
+          = xs r -> case interleave_ t ts id xs r { (_, zs) -> zs },
       { foldr interleave (perms ts [t, ..is]) (permutations is) }
   }
 }
@@ -295,16 +293,53 @@ test all {
   == (all (xs -> == (sum xs) 4) [[1, 3], [2, 2], [0, 4]]) True
 }
 
-map_accum_l : (s -> a -> Pair s b) -> s -> List a -> Pair s (List b) {
+map_accum_l : (s -> a -> (s, b)) -> s -> List a -> (s, List b) {
   f z l -> foldl (acc x -> case acc {
-    Pair r l2 ->
+    (r, l2) ->
       let y = f r x {
         case y {
-          Pair r2 y2 -> Pair r2 [y2, ..l2]
+          (r2, y2) -> (r2, [y2, ..l2])
         }
       }
     }
-  ) (Pair z []) l
+  ) (z, []) l
 }
 
-// test map_accum_l { == (Pair 10 [0, 1, 3, 6]) (map_accum_l (a b -> Pair (+ a b) a) 0 [1, 2, 3, 4]) }
+// Possibly this shouldn't be backwards
+test map_accum_l {
+  == (10, [9, 7, 4, 0])
+  (map_accum_l (a b -> (+ a b, a)) 0 [1, 2, 3, 4])
+}
+
+seq_opt : List (opt.Option a) -> opt.Option (List a) {
+  xs -> case xs {
+    [] -> opt.Some [],
+    [x, ..r] -> case x {
+      opt.Some y -> case seq_opt r {
+        opt.None -> opt.None,
+        opt.Some zs -> opt.Some [y, ..zs]
+      }
+      // note: if this branch is missing, the compiler doesn't notice
+      opt.None -> opt.None,
+    }
+  }
+}
+
+test seq_opt {
+  == [opt.Some [1,2,3], opt.None] (map seq_opt [
+    [opt.Some 1, opt.Some 2, opt.Some 3],
+    [opt.Some 1, opt.None, opt.Some 3],
+  ])
+}
+
+any : (a -> Bool) -> List a -> Bool {
+  f xs -> case xs {
+    [] -> False,
+    [x, ..r] -> case f x {
+      True -> True,
+      False -> any f r
+    }
+  }
+}
+
+

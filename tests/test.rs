@@ -58,12 +58,13 @@ fn tests() {
     let _ = tracing_subscriber::fmt::try_init();
 
     let test_fixtures = std::fs::read_dir("fixtures/tests").unwrap();
+    let lib_test_fixtures = std::fs::read_dir("fixtures/lib").unwrap();
 
     let mut num_failures = 0;
 
     let mut output_writer = vec![];
 
-    for entry in test_fixtures {
+    for entry in test_fixtures.chain(lib_test_fixtures) {
         let entry = entry.unwrap();
         let path = entry.path();
         println!("Analyzing {}", path.display());

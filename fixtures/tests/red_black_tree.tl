@@ -1,4 +1,4 @@
-use ./list.tl as list
+use ../lib/list.tl as list
 
 type Ordering {
   Lt,
