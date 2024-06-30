@@ -12,8 +12,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use ast::{Decl, GlobalName, HasLoc, Loc};
+use compiler::Program;
 use tracing::debug;
 use typechecker::Typechecker;
+use vm::{RunState, Value, Vm};
 
 #[derive(Debug)]
 pub enum Error {
@@ -315,4 +317,144 @@ impl<'a> Runner<'a> {
         }
         Ok(failures)
     }
+
+    pub fn debug(&mut self, func_name: &str) -> Result<(), Error> {
+        let compiler = self.compile()?;
+        let vm = vm::Vm::from_compiler(compiler);
+
+        let func_name =
+            GlobalName::named(&self.path.canonicalize().unwrap(), func_name).to_string();
+        match vm.functions.get(&func_name) {
+            Some((func_instr_loc, _)) => {
+                let mut state = vm.init_state(*func_instr_loc);
+                let stdin = std::io::stdin();
+                let mut buf = String::new();
+
+                loop {
+                    print_debug_state(&vm, &state);
+                    println!("\nPress Enter to continue.\n");
+                    let _ = stdin.read_line(&mut buf)?;
+                    match vm.step(&mut state) {
+                        Err(error) => {
+                            writeln!(&mut self.output, "Error:\n")?;
+                            writeln!(&mut self.output, "{:?}", error)?;
+                            return Err(Error::Eval);
+                        }
+                        Ok(Some(result)) => {
+                            println!("{}", result);
+                            return Ok(());
+                        }
+                        Ok(None) => {}
+                    }
+                }
+            }
+            None => println!("Function {func_name} not found"),
+        }
+        Ok(())
+    }
+}
+
+fn print_debug_state<'a>(vm: &Vm, state: &RunState<'a>) {
+    let stack = &state.stack;
+
+    let mut stack_lines = print_stack(stack).into_iter();
+    let mut code_lines = print_code(&vm.prog, state).into_iter();
+
+    println!("Code{:90}Stack ({})", "", state.stack.len());
+
+    loop {
+        match code_lines.next() {
+            None => match stack_lines.next() {
+                None => {
+                    break;
+                }
+                Some(stack_line) => {
+                    // print an empty code line (80 chars + 10 chars gap)
+                    println!("{:90}{:.80}", "", stack_line);
+                }
+            },
+            Some(code_line) => match stack_lines.next() {
+                None => {
+                    println!("{:.80}", code_line);
+                }
+                Some(stack_line) => println!("{:90.80}{:.80}", code_line, stack_line),
+            },
+        }
+    }
+}
+
+fn print_code(program: &Program, state: &RunState) -> Vec<String> {
+    // stack print height is 22 lines
+    // find the current instruction location
+    // print 10 lines before and 10 lines after
+    let current_block = program.get_block(state.block_id);
+    // TODO: if ip < 10, get preceding instructions from block in stack frame (or current_func_block_id?)
+    let idx_min = state.instruction_ptr.saturating_sub(10);
+    let idx_max = current_block.len().min(state.instruction_ptr + 10);
+    current_block[idx_min..idx_max]
+        .iter()
+        .enumerate()
+        .map(|(i, ins)| {
+            if idx_min + i == state.instruction_ptr {
+                format!(" >{:>3} {:>3}: {}", state.block_id.0, i, ins)
+            } else {
+                format!("  {:>3} {:>3}: {}", state.block_id.0, i, ins)
+            }
+        })
+        .collect()
+}
+
+fn print_stack(stack: &[Value]) -> Vec<String> {
+    let mut result = vec![];
+
+    fn draw_stack_top(width: usize, result: &mut Vec<String>) {
+        let mut s = "┌".to_string();
+        for _ in 0..width {
+            s.push_str("─");
+        }
+        s.push_str("┐");
+        result.push(s);
+    }
+
+    fn draw_stack_item(width: usize, item: &str, result: &mut Vec<String>) {
+        result.push(format!("│{item:^0$.78}│", width))
+    }
+
+    fn draw_stack_mid(width: usize, result: &mut Vec<String>) {
+        let mut s = "├".to_string();
+        for _ in 0..width {
+            s.push_str("─");
+        }
+        s.push_str("┤");
+        result.push(format!("{}", s));
+    }
+
+    fn draw_stack_bottom(width: usize, result: &mut Vec<String>) {
+        let mut s = "└".to_string();
+        for _ in 0..width {
+            s.push_str("─");
+        }
+        s.push_str("┘");
+        result.push(format!("{}", s));
+    }
+
+    let max = 10;
+    let sample: Vec<Value> = stack.iter().cloned().rev().take(max).rev().collect();
+    let mut items: Vec<String> = sample.iter().map(|item| format!("{item:.78}")).collect();
+    if items.is_empty() {
+        items = vec!["<empty>".to_string()];
+    }
+    let width = (items.iter().map(|i| i.len()).max().unwrap() + 2).min(78);
+    let num = items.len();
+
+    draw_stack_top(width, &mut result);
+    for (i, item) in items.iter().enumerate() {
+        draw_stack_item(width, item, &mut result);
+        if i == num - 1 {
+            draw_stack_bottom(width, &mut result);
+        } else {
+            draw_stack_mid(width, &mut result);
+        }
+    }
+    result
 }

@@ -7,12 +7,14 @@ Usage:
   tl run <PATH> <FUNC>
   tl test <PATH>
   tl compile <PATH>
+  tl debug <PATH> <FUNC>
 
   Example:
 
     tl run foo/bar.tl my_func
     tl test foo/bar.tl
     tl compile foo/bar.tl
+    tl debug foo/bar.tl my_func
 
 ";
 
@@ -49,6 +51,15 @@ fn main() {
                 let runner = tl::Runner::from_path(&PathBuf::from(input_file), stdout).unwrap();
                 let compiler = runner.compile().unwrap();
                 println!("{}", compiler.program);
+            }
+            "debug" => {
+                let input_file = args.next().expect(USAGE);
+                let function = args.next().expect(USAGE);
+                let stdout = std::io::stdout();
+
+                let mut runner = tl::Runner::from_path(&PathBuf::from(input_file), stdout).unwrap();
+
+                runner.debug(&function).unwrap();
             }
             _ => fail(),
         },

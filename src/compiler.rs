@@ -594,7 +594,17 @@ impl std::fmt::Display for Instruction {
             Instruction::Ctor(name, num_args) => write!(f, "ctor {:?} {}", name, num_args),
             Instruction::Call => write!(f, "call"),
             Instruction::TailCall => write!(f, "tail_call"),
-            Instruction::Case(b) => write!(f, "case {:?}", b),
+            Instruction::Case(branches) => {
+                write!(f, "case {{ ")?;
+                for (i, (pattern, jump)) in branches.iter().enumerate() {
+                    if i == branches.len() - 1 {
+                        write!(f, "{} -> {} }}", pattern, jump)?;
+                    } else {
+                        write!(f, "{} -> {}, ", pattern, jump)?;
+                    }
+                }
+                Ok(())
+            }
             Instruction::Jump(n) => write!(f, "jmp {n}"),
             Instruction::Ret => write!(f, "ret"),
             Instruction::Shift(n) => write!(f, "shift {n}"),
