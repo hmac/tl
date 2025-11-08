@@ -11,7 +11,7 @@ use crate::{
 pub struct Compiler {
     pub program: Program,
     // name => (start instruction, arg names)
-    pub functions: HashMap<String, (BlockId, Vec<String>)>,
+    pub functions: HashMap<String, FuncProperties>,
     rng: tinyrand::StdRand,
     imports: Imports,
 }
@@ -60,7 +60,14 @@ impl Compiler {
         };
         let id = self.program.add_block(name, ins);
         let name = GlobalName::named(path, name);
-        self.functions.insert(name.to_string(), (id, args));
+        self.functions.insert(
+            name.to_string(),
+            FuncProperties {
+                name: name.to_string(),
+                block_id: id,
+                arg_names: args,
+            },
+        );
         Ok(())
     }
 
@@ -417,8 +424,14 @@ impl Compiler {
             true,
         )?;
         let block_id = self.program.add_block(&name, ins);
-        self.functions
-            .insert(name.clone(), (block_id, body_locals.to_vec()));
+        self.functions.insert(
+            name.clone(),
+            FuncProperties {
+                name: name.clone(),
+                block_id,
+                arg_names: body_locals.to_vec(),
+            },
+        );
         Ok(name)
     }
 
@@ -657,4 +670,11 @@ impl std::fmt::Display for Program {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct FuncProperties {
+    pub name: String,
+    pub block_id: BlockId,
+    pub arg_names: Vec<String>,
 }

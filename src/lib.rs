@@ -15,7 +15,7 @@ use ast::{Decl, GlobalName, HasLoc, Loc};
 use compiler::Program;
 use tracing::debug;
 use typechecker::Typechecker;
-use vm::{RunState, Value, Vm};
+use vm::{RunState, StackValue, Vm};
 
 #[derive(Debug)]
 pub enum Error {
@@ -53,6 +53,8 @@ pub struct Runner<'a> {
     files: HashMap<PathBuf, Vec<Decl>>,
     // The path of the main file
     path: PathBuf,
+    // If given, run only tests with names matching this substring
+    test_name_filter: Option<String>,
     output: Box<dyn Write + 'a>,
     typechecker: Typechecker,
 }
@@ -61,13 +63,19 @@ impl<'a> Runner<'a> {
     pub fn from_path<W: Write + 'a>(path: &Path, output: W) -> Result<Self, Error> {
         let source = std::fs::read_to_string(path)?;
 
-        Self::new(path, source, output)
+        Self::new(path, source, None, output)
     }
 
-    pub fn new<W: Write + 'a>(path: &Path, source: String, output: W) -> Result<Self, Error> {
+    pub fn new<W: Write + 'a>(
+        path: &Path,
+        source: String,
+        test_name_filter: Option<String>,
+        output: W,
+    ) -> Result<Self, Error> {
         let mut this = Self {
             files: HashMap::new(),
             path: path.to_path_buf(),
+            test_name_filter,
             output: Box::new(output),
             typechecker: Typechecker::new(),
         };
@@ -263,7 +271,7 @@ impl<'a> Runner<'a> {
         let func_name =
             GlobalName::named(&self.path.canonicalize().unwrap(), func_name).to_string();
         match vm.functions.get(&func_name) {
-            Some((func_instr_loc, _)) => match vm.run(*func_instr_loc) {
+            Some(props) => match vm.run(props.block_id) {
                 Ok(value) => Ok(value),
                 Err(error) => {
                     writeln!(&mut self.output, "Error:\n")?;
@@ -290,10 +298,18 @@ impl<'a> Runner<'a> {
         for decl in self.files.get(&path).unwrap() {
             match decl {
                 Decl::Test { name, .. } => {
+                    if let Some(ref filter) = self.test_name_filter {
+                        if !name.contains(filter) {
+                            debug!(
+                                "skipping test {name} because it does not match filter {filter}"
+                            );
+                            continue;
+                        }
+                    }
                     debug!("running test {name}");
                     let test_name = GlobalName::named(&path, &format!("test_{name}")).to_string();
-                    let (block_id, _args) = vm.functions.get(&test_name).unwrap();
-                    match vm.run(*block_id) {
+                    let func_props = vm.functions.get(&test_name).unwrap();
+                    match vm.run(func_props.block_id) {
                         Ok(result) => match result {
                             vm::Value::Int(_) => todo!(),
                             vm::Value::Bool(true) => {
@@ -325,8 +341,8 @@ impl<'a> Runner<'a> {
         let func_name =
             GlobalName::named(&self.path.canonicalize().unwrap(), func_name).to_string();
         match vm.functions.get(&func_name) {
-            Some((func_instr_loc, _)) => {
-                let mut state = vm.init_state(*func_instr_loc);
+            Some(func_props) => {
+                let mut state = vm.init_state(func_props.block_id);
                 let stdin = std::io::stdin();
                 let mut buf = String::new();
 
@@ -404,7 +420,7 @@ fn print_code(program: &Program, state: &RunState) -> Vec<String> {
         .collect()
 }
 
-fn print_stack(stack: &[Value]) -> Vec<String> {
+fn print_stack(stack: &[StackValue]) -> Vec<String> {
     let mut result = vec![];
 
     fn draw_stack_top(width: usize, result: &mut Vec<String>) {
@@ -439,7 +455,7 @@ fn print_stack(stack: &[Value]) -> Vec<String> {
     }
 
     let max = 10;
-    let sample: Vec<Value> = stack.iter().cloned().rev().take(max).rev().collect();
+    let sample: Vec<StackValue> = stack.iter().cloned().rev().take(max).rev().collect();
     let mut items: Vec<String> = sample.iter().map(|item| format!("{item:.78}")).collect();
     if items.is_empty() {
         items = vec!["<empty>".to_string()];

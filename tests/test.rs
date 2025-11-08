@@ -19,7 +19,7 @@ fn fixtures() {
         let mut output_writer = vec![];
 
         let result = {
-            let runner = tl::Runner::new(&path, input.to_string(), &mut output_writer);
+            let runner = tl::Runner::new(&path, input.to_string(), None, &mut output_writer);
             runner.and_then(|mut r| r.run("main"))
         };
 
@@ -55,26 +55,54 @@ fn fixtures() {
 #[cfg(test)]
 #[test]
 fn tests() {
+    use tracing::debug;
+
     let _ = tracing_subscriber::fmt::try_init();
 
     let test_fixtures = std::fs::read_dir("fixtures/tests").unwrap();
     let lib_test_fixtures = std::fs::read_dir("fixtures/lib").unwrap();
 
     let mut num_failures = 0;
+    let mut num_passes = 0;
+    let mut failing_tests = vec![];
 
     let mut output_writer = vec![];
+
+    let test_file_filter = std::env::var("TL_TEST_FILE");
+    let test_name_filter = std::env::var("TL_TEST_NAME").ok();
 
     for entry in test_fixtures.chain(lib_test_fixtures) {
         let entry = entry.unwrap();
         let path = entry.path();
+
+        if let Ok(filter) = test_file_filter.as_ref() {
+            if let Some(path_str) = path.to_str() {
+                if !path_str.contains(filter.as_str()) {
+                    debug!("Skipping test {path_str} due to filter {filter}");
+                    continue;
+                }
+            }
+        }
+
         println!("Analyzing {}", path.display());
 
         let file_contents = std::fs::read_to_string(&path).unwrap();
 
-        let runner = tl::Runner::new(&path, file_contents.to_string(), &mut output_writer);
+        let runner = tl::Runner::new(
+            &path,
+            file_contents.to_string(),
+            test_name_filter.clone(),
+            &mut output_writer,
+        );
         match runner {
             Ok(mut runner) => {
-                num_failures += runner.run_tests().unwrap();
+                let failures = runner.run_tests().unwrap();
+                if failures > 0 {
+                    num_failures += runner.run_tests().unwrap();
+                    failing_tests.push(path.display().to_string());
+                } else {
+                    num_passes += 1;
+                }
             }
             Err(ref error) => {
                 let error = format!("{:?}", error);
@@ -89,7 +117,8 @@ fn tests() {
 
     if num_failures > 0 {
         println!("{}", String::from_utf8(output_writer).unwrap());
-        println!("{} failures.", num_failures);
+        println!("{num_failures} failures: {failing_tests:?}");
         panic!();
     }
+    eprintln!("{num_passes} passing test files");
 }
