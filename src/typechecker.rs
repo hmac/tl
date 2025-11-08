@@ -354,7 +354,7 @@ impl Typechecker {
             DefinedTypeInfo {
                 parameters: vec![],
                 loc: (0, 0),
-                path: builtin_path.clone(),
+                path: builtin_path,
             },
         );
         // Insert the constructors for Bool, which is a built-in type.
@@ -406,7 +406,7 @@ impl Typechecker {
             },
         );
         for ctor in constructors {
-            let ctor_type = self.make_constructor_type(loc, path, None, &name, params, &ctor)?;
+            let ctor_type = self.make_constructor_type(loc, path, None, name, params, ctor)?;
             let ctor_name = GlobalName::named(path, &ctor.name);
             // Note: we don't check the type now.
             // That happens later, see `check_all_types`.
@@ -435,7 +435,7 @@ impl Typechecker {
     ) -> Result<(), Error> {
         // TODO: Check that function name is not already in use
         // TODO: Check that type is well-formed
-        let ty = self.type_from_source_type(path, &source_type)?;
+        let ty = self.type_from_source_type(path, source_type)?;
         self.check_type(path, &ty, source_type.loc(), &ty.vars())?;
         self.functions
             .insert(GlobalName::named(path, name), (loc, ty));
@@ -608,7 +608,7 @@ impl Typechecker {
                     path,
                     branches,
                     &target_type,
-                    &expected_type,
+                    expected_type,
                 )?;
 
                 Ok(())
@@ -731,7 +731,7 @@ impl Typechecker {
                 } in bindings
                 {
                     let ty = if let Some(source_type) = r#type {
-                        let ty = self.type_from_source_type(path, &source_type)?;
+                        let ty = self.type_from_source_type(path, source_type)?;
                         // Type variables in let bindings are treated similarly to those in
                         // function signatures: they should not be unified.
                         for var in ty.vars() {
@@ -742,7 +742,7 @@ impl Typechecker {
                             &local_variables.extend(new_locals.clone()),
                             type_variables,
                             path,
-                            &value,
+                            value,
                             &ty,
                         )?;
                         ty
@@ -751,7 +751,7 @@ impl Typechecker {
                             &local_variables.extend(new_locals.clone()),
                             type_variables,
                             path,
-                            &value,
+                            value,
                         )?
                     };
                     new_locals.insert(name.to_string(), ty);
@@ -761,7 +761,7 @@ impl Typechecker {
                     &local_variables.extend(new_locals),
                     type_variables,
                     path,
-                    &body,
+                    body,
                     expected_type,
                 )
             }
@@ -823,7 +823,7 @@ impl Typechecker {
         // after that we have to infer the remaining arguments.
 
         // Check the args we have types for
-        let mut args = args.into_iter();
+        let mut args = args.iter();
         let mut last_arg_loc: Option<Loc> = None; // used to calculate locations later.
         for type_arg in head_type_args.iter() {
             match args.next() {
@@ -994,7 +994,7 @@ impl Typechecker {
                 head, args, loc, ..
             } => {
                 // Infer the type of the function
-                let head_ty = self.infer_expr(local_variables, type_variables, path, &head)?;
+                let head_ty = self.infer_expr(local_variables, type_variables, path, head)?;
 
                 // Deconstruct the function type
                 match head_ty {
@@ -1037,7 +1037,7 @@ impl Typechecker {
                         &local_variables.extend(new_locals.clone()),
                         type_variables,
                         path,
-                        &value,
+                        value,
                     )?;
                     new_locals.insert(name.to_string(), ty);
                 }
@@ -1046,7 +1046,7 @@ impl Typechecker {
                     &local_variables.extend(new_locals),
                     type_variables,
                     path,
-                    &body,
+                    body,
                 )
             }
         }
@@ -1164,7 +1164,7 @@ impl Typechecker {
 
                     // func_args always returns a non-empty vector, so this unwrap is safe
                     let ctor_result_type = *ty.func_args().back().unwrap();
-                    self.assert_type_eq(type_variables, expected_type, &ctor_result_type, *loc)?;
+                    self.assert_type_eq(type_variables, expected_type, ctor_result_type, *loc)?;
                     ty
                 };
 
@@ -1183,7 +1183,7 @@ impl Typechecker {
                 // Add each pattern to the set of local variables
                 for (pattern, ty) in args.iter().zip(ctor_ty_args.into_iter()) {
                     let vars =
-                        self.check_match_branch_pattern(type_variables, path, &pattern, &ty)?;
+                        self.check_match_branch_pattern(type_variables, path, pattern, ty)?;
                     new_vars.extend(vars);
                 }
             }
@@ -1375,7 +1375,7 @@ impl Typechecker {
         match &branch.pattern {
             Pattern::Int { loc, .. } => {
                 // The target type must be Int
-                self.assert_type_eq(type_variables, &target_type, &Type::Int, *loc)?;
+                self.assert_type_eq(type_variables, target_type, &Type::Int, *loc)?;
                 self.infer_expr(local_variables, type_variables, path, &branch.rhs)
             }
             Pattern::Wildcard { .. } => {
@@ -1386,7 +1386,7 @@ impl Typechecker {
                 // The target type must be List a for some a
                 let var = self.make_fresh_var(type_variables);
                 let list_type = self.make_list_type(var);
-                self.assert_type_eq(type_variables, &target_type, &list_type, *loc)?;
+                self.assert_type_eq(type_variables, target_type, &list_type, *loc)?;
                 self.infer_expr(local_variables, type_variables, path, &branch.rhs)
             }
             Pattern::ListCons { .. } => {
@@ -1409,7 +1409,7 @@ impl Typechecker {
 
                 // func_args always returns a non-empty vector, so this unwrap is safe
                 let ctor_result_type = *ctor_type.func_args().back().unwrap();
-                self.assert_type_eq(type_variables, &target_type, &ctor_result_type, *loc)?;
+                self.assert_type_eq(type_variables, target_type, ctor_result_type, *loc)?;
 
                 // Check the constructor has the right number of args
                 let ctor_ty_args = ctor_type.func_args();
@@ -1454,7 +1454,7 @@ impl Typechecker {
                     vars.push(var);
                 }
                 let tuple_type = Type::Tuple(vars.clone());
-                self.assert_type_eq(type_variables, &target_type, &tuple_type, *loc)?;
+                self.assert_type_eq(type_variables, target_type, &tuple_type, *loc)?;
 
                 // Infer the rhs
                 let local_variables = local_variables.extend(new_locals);
@@ -1736,20 +1736,18 @@ impl Typechecker {
                         debug!("lookup: {} = {}", &expected, &t);
                         if t == actual {
                             Ok(true)
+                        } else if swapped {
+                            Err(Error::ExpectedType {
+                                loc,
+                                expected: actual.clone(),
+                                actual: t.clone(),
+                            })
                         } else {
-                            if swapped {
-                                Err(Error::ExpectedType {
-                                    loc,
-                                    expected: actual.clone(),
-                                    actual: t.clone(),
-                                })
-                            } else {
-                                Err(Error::ExpectedType {
-                                    loc,
-                                    expected: t.clone(),
-                                    actual: actual.clone(),
-                                })
-                            }
+                            Err(Error::ExpectedType {
+                                loc,
+                                expected: t.clone(),
+                                actual: actual.clone(),
+                            })
                         }
                     }
                     VarState::Poly => {
@@ -1933,7 +1931,7 @@ impl Typechecker {
 
         for a in constructor.arguments.iter().rev() {
             ty = Type::Func(
-                Box::new(self.type_from_source_type(path, &a)?),
+                Box::new(self.type_from_source_type(path, a)?),
                 Box::new(ty),
             );
         }

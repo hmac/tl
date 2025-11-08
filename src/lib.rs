@@ -194,7 +194,7 @@ impl<'a> Runner<'a> {
                 for decl in &ast {
                     match decl {
                         Decl::Func { r#type, body, .. } => {
-                            if let Err(error) = self.typechecker.check_func(&path, body, &r#type) {
+                            if let Err(error) = self.typechecker.check_func(&path, body, r#type) {
                                 writeln!(self.output, "Error:\n")?;
                                 ast::print_error(
                                     &mut self.output,
@@ -254,7 +254,7 @@ impl<'a> Runner<'a> {
                         // namespacing.
                         // TODO: proper namespacing for tests
                         compiler
-                            .compile_func(path, &format!("test_{name}"), &body)
+                            .compile_func(path, &format!("test_{name}"), body)
                             .unwrap();
                     }
                     _ => {}

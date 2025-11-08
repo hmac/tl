@@ -348,96 +348,94 @@ impl Vm {
                                 *current_func_block_id = func_block_id;
                                 *block = self.prog.get_block(func_block_id);
                                 *instruction_ptr = 0;
-                            } else {
-                                if (num_args as usize) < args.len() + len {
-                                    debug!(
-                                        "func name={name} num_args={num_args} block_id={} (oversaturated)",
-                                        func_block_id.0
-                                    );
-                                    // num_args may be less than args.len() + len if the function
-                                    // returns another function. We handle this by:
-                                    // - supplying as many args as needed to saturate the current function
-                                    // - evaluating its body
-                                    // - returning to here to apply the remaining args, possible
-                                    //   re-evaluating if the returned function is also saturated.
+                            } else if num_args < args.len() + len {
+                                debug!(
+                                    "func name={name} num_args={num_args} block_id={} (oversaturated)",
+                                    func_block_id.0
+                                );
+                                // num_args may be less than args.len() + len if the function
+                                // returns another function. We handle this by:
+                                // - supplying as many args as needed to saturate the current function
+                                // - evaluating its body
+                                // - returning to here to apply the remaining args, possible
+                                //   re-evaluating if the returned function is also saturated.
 
-                                    // After calling the function we want to return to here,
-                                    // as the function will return another function that we then
-                                    // want to call. However upon returning to here, `len` will be
-                                    // incorrect (as it refers to the number of originally-applied
-                                    // args, not the number of remaining args.
-                                    // In Kite we solved this by storing `len` on the stack (via
-                                    // PushInt) prior to the `Call` instruction. Maybe we want to
-                                    // do the same here?
+                                // After calling the function we want to return to here,
+                                // as the function will return another function that we then
+                                // want to call. However upon returning to here, `len` will be
+                                // incorrect (as it refers to the number of originally-applied
+                                // args, not the number of remaining args.
+                                // In Kite we solved this by storing `len` on the stack (via
+                                // PushInt) prior to the `Call` instruction. Maybe we want to
+                                // do the same here?
 
-                                    // When the function returns, we want the stack to look like
-                                    // argN
-                                    // argN-1
-                                    // ...
-                                    // argM+1
-                                    // len (N-M)
-                                    // return value
+                                // When the function returns, we want the stack to look like
+                                // argN
+                                // argN-1
+                                // ...
+                                // argM+1
+                                // len (N-M)
+                                // return value
 
-                                    // So first we pop all the args that the called function will
-                                    // use.
+                                // So first we pop all the args that the called function will
+                                // use.
 
-                                    let num_extra_args = num_args - args.len();
-                                    let mut extra_args = vec![];
-                                    for _ in 0..num_extra_args {
-                                        extra_args.push(stack.pop().unwrap());
-                                    }
-
-                                    debug!("arg len stack index: {}", stack.len());
-
-                                    // Then we push the new len (len - num_args) onto the stack,
-                                    // then push the args required to saturate the function
-                                    // (arg0..argM).
-                                    stack.push(StackValue::Int((len - num_args) as i64));
-
-                                    // Then we push the already-applied args onto the stack
-                                    for arg in args.iter().rev() {
-                                        stack.push(rc_value_to_stack_value(Rc::clone(arg)));
-                                    }
-
-                                    // Then we push the additional args supplied in this call
-                                    for arg in extra_args {
-                                        stack.push(arg);
-                                    }
-
-                                    debug!("arg0 stack index: {}", stack.len());
-
-                                    // Construct the new frame
-                                    let frame = (
-                                        *current_func_block_id,
-                                        *block_id,
-                                        ip,
-                                        stack.len() - num_args,
-                                    );
-
-                                    debug!("frame: {:?}", frame);
-                                    frames.push(frame);
-
-                                    // Jump to the function
-                                    *block_id = func_block_id;
-                                    *current_func_block_id = func_block_id;
-                                    *block = self.prog.get_block(func_block_id);
-                                    *instruction_ptr = 0;
-                                } else {
-                                    debug!("func name={name} num_args={num_args}");
-                                    // Push the new args and put the function back on the stack
-                                    let mut new_args = vec![];
-                                    for a in args {
-                                        new_args.push(Rc::clone(a))
-                                    }
-                                    for _ in 0..len {
-                                        new_args.push(stack.pop().unwrap().to_heap_value_rc());
-                                    }
-                                    stack.push(StackValue::Func {
-                                        props: Rc::clone(props),
-                                        args: new_args,
-                                    });
-                                    *instruction_ptr += 1;
+                                let num_extra_args = num_args - args.len();
+                                let mut extra_args = vec![];
+                                for _ in 0..num_extra_args {
+                                    extra_args.push(stack.pop().unwrap());
                                 }
+
+                                debug!("arg len stack index: {}", stack.len());
+
+                                // Then we push the new len (len - num_args) onto the stack,
+                                // then push the args required to saturate the function
+                                // (arg0..argM).
+                                stack.push(StackValue::Int((len - num_args) as i64));
+
+                                // Then we push the already-applied args onto the stack
+                                for arg in args.iter().rev() {
+                                    stack.push(rc_value_to_stack_value(Rc::clone(arg)));
+                                }
+
+                                // Then we push the additional args supplied in this call
+                                for arg in extra_args {
+                                    stack.push(arg);
+                                }
+
+                                debug!("arg0 stack index: {}", stack.len());
+
+                                // Construct the new frame
+                                let frame = (
+                                    *current_func_block_id,
+                                    *block_id,
+                                    ip,
+                                    stack.len() - num_args,
+                                );
+
+                                debug!("frame: {:?}", frame);
+                                frames.push(frame);
+
+                                // Jump to the function
+                                *block_id = func_block_id;
+                                *current_func_block_id = func_block_id;
+                                *block = self.prog.get_block(func_block_id);
+                                *instruction_ptr = 0;
+                            } else {
+                                debug!("func name={name} num_args={num_args}");
+                                // Push the new args and put the function back on the stack
+                                let mut new_args = vec![];
+                                for a in args {
+                                    new_args.push(Rc::clone(a))
+                                }
+                                for _ in 0..len {
+                                    new_args.push(stack.pop().unwrap().to_heap_value_rc());
+                                }
+                                stack.push(StackValue::Func {
+                                    props: Rc::clone(props),
+                                    args: new_args,
+                                });
+                                *instruction_ptr += 1;
                             }
                         }
                         Value::Constructor { name, args } => {
@@ -590,96 +588,94 @@ impl Vm {
             *current_func_block_id = func_block_id;
             *block = self.prog.get_block(func_block_id);
             *instruction_ptr = 0;
-        } else {
-            if num_args < args.len() + len {
-                debug!(
-                    "func name={name} num_args={num_args} block_id={} (oversaturated)",
-                    func_block_id.0
-                );
-                // num_args may be less than args.len() + len if the function
-                // returns another function. We handle this by:
-                // - supplying as many args as needed to saturate the current function
-                // - evaluating its body
-                // - returning to here to apply the remaining args, possible
-                //   re-evaluating if the returned function is also saturated.
+        } else if num_args < args.len() + len {
+            debug!(
+                "func name={name} num_args={num_args} block_id={} (oversaturated)",
+                func_block_id.0
+            );
+            // num_args may be less than args.len() + len if the function
+            // returns another function. We handle this by:
+            // - supplying as many args as needed to saturate the current function
+            // - evaluating its body
+            // - returning to here to apply the remaining args, possible
+            //   re-evaluating if the returned function is also saturated.
 
-                // After calling the function we want to return to here,
-                // as the function will return another function that we then
-                // want to call. However upon returning to here, `len` will be
-                // incorrect (as it refers to the number of originally-applied
-                // args, not the number of remaining args.
-                // In Kite we solved this by storing `len` on the stack (via
-                // PushInt) prior to the `Call` instruction. Maybe we want to
-                // do the same here?
+            // After calling the function we want to return to here,
+            // as the function will return another function that we then
+            // want to call. However upon returning to here, `len` will be
+            // incorrect (as it refers to the number of originally-applied
+            // args, not the number of remaining args.
+            // In Kite we solved this by storing `len` on the stack (via
+            // PushInt) prior to the `Call` instruction. Maybe we want to
+            // do the same here?
 
-                // When the function returns, we want the stack to look like
-                // argN
-                // argN-1
-                // ...
-                // argM+1
-                // len (N-M)
-                // return value
+            // When the function returns, we want the stack to look like
+            // argN
+            // argN-1
+            // ...
+            // argM+1
+            // len (N-M)
+            // return value
 
-                // So first we pop all the args that the called function will
-                // use.
+            // So first we pop all the args that the called function will
+            // use.
 
-                let num_extra_args = num_args - args.len();
-                let mut extra_args = vec![];
-                for _ in 0..num_extra_args {
-                    extra_args.push(stack.pop().unwrap());
-                }
-
-                debug!("arg len stack index: {}", stack.len());
-
-                // Then we push the new len (len - num_args) onto the stack,
-                // then push the args required to saturate the function
-                // (arg0..argM).
-                stack.push(StackValue::Int((len - num_args) as i64));
-
-                // Then we push the already-applied args onto the stack
-                for arg in args.into_iter().rev() {
-                    stack.push(rc_value_to_stack_value(arg));
-                }
-
-                // Then we push the additional args supplied in this call
-                for arg in extra_args {
-                    stack.push(arg);
-                }
-
-                debug!("arg0 stack index: {}", stack.len());
-
-                // Construct the new frame
-                let frame = (
-                    *current_func_block_id,
-                    *block_id,
-                    *instruction_ptr,
-                    stack.len() - num_args,
-                );
-
-                debug!("frame: {:?}", frame);
-                frames.push(frame);
-
-                // Jump to the function
-                *block_id = func_block_id;
-                *current_func_block_id = func_block_id;
-                *block = self.prog.get_block(func_block_id);
-                *instruction_ptr = 0;
-            } else {
-                debug!("func name={name} num_args={num_args}");
-                // Push the new args and put the function back on the stack
-                let mut new_args = vec![];
-                for a in args {
-                    new_args.push(Rc::clone(&a))
-                }
-                for _ in 0..len {
-                    new_args.push(stack.pop().unwrap().to_heap_value_rc());
-                }
-                stack.push(StackValue::Func {
-                    props: Rc::clone(&props),
-                    args: new_args,
-                });
-                *instruction_ptr += 1;
+            let num_extra_args = num_args - args.len();
+            let mut extra_args = vec![];
+            for _ in 0..num_extra_args {
+                extra_args.push(stack.pop().unwrap());
             }
+
+            debug!("arg len stack index: {}", stack.len());
+
+            // Then we push the new len (len - num_args) onto the stack,
+            // then push the args required to saturate the function
+            // (arg0..argM).
+            stack.push(StackValue::Int((len - num_args) as i64));
+
+            // Then we push the already-applied args onto the stack
+            for arg in args.into_iter().rev() {
+                stack.push(rc_value_to_stack_value(arg));
+            }
+
+            // Then we push the additional args supplied in this call
+            for arg in extra_args {
+                stack.push(arg);
+            }
+
+            debug!("arg0 stack index: {}", stack.len());
+
+            // Construct the new frame
+            let frame = (
+                *current_func_block_id,
+                *block_id,
+                *instruction_ptr,
+                stack.len() - num_args,
+            );
+
+            debug!("frame: {:?}", frame);
+            frames.push(frame);
+
+            // Jump to the function
+            *block_id = func_block_id;
+            *current_func_block_id = func_block_id;
+            *block = self.prog.get_block(func_block_id);
+            *instruction_ptr = 0;
+        } else {
+            debug!("func name={name} num_args={num_args}");
+            // Push the new args and put the function back on the stack
+            let mut new_args = vec![];
+            for a in args {
+                new_args.push(Rc::clone(&a))
+            }
+            for _ in 0..len {
+                new_args.push(stack.pop().unwrap().to_heap_value_rc());
+            }
+            stack.push(StackValue::Func {
+                props: Rc::clone(&props),
+                args: new_args,
+            });
+            *instruction_ptr += 1;
         }
     }
 }
@@ -809,10 +805,8 @@ fn match_pattern(target: StackValue, pattern: &Pattern) -> Option<Vec<StackValue
                         if let Some(tail) = tail {
                             let mut tail_match = match_pattern_heap(&xs, tail)?;
                             elem_matches.append(&mut tail_match);
-                        } else {
-                            if *xs != Value::ListNil {
-                                return None;
-                            }
+                        } else if *xs != Value::ListNil {
+                            return None;
                         }
                         Some(elem_matches)
                     }
@@ -918,10 +912,8 @@ fn match_pattern_heap(target: &Rc<Value>, pattern: &Pattern) -> Option<Vec<Stack
                     if let Some(tail) = tail {
                         let mut tail_match = match_pattern_heap(&xs, tail)?;
                         elem_matches.append(&mut tail_match);
-                    } else {
-                        if *xs != Value::ListNil {
-                            return None;
-                        }
+                    } else if *xs != Value::ListNil {
+                        return None;
                     }
                     Some(elem_matches)
                 }

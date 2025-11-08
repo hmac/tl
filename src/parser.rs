@@ -136,12 +136,10 @@ impl Parser {
                     len += 1;
                 }
                 len += 1;
+            } else if self.input()[len..].starts_with(whitespace_char) {
+                len += 1;
             } else {
-                if self.input()[len..].starts_with(whitespace_char) {
-                    len += 1;
-                } else {
-                    break;
-                }
+                break;
             }
         }
 
@@ -367,7 +365,7 @@ impl Parser {
     // (Foo -> Bar Baz)
     // some_import.Foo
     fn parse_type_nested(&mut self) -> Result<SourceType, Error> {
-        if self.input().starts_with("(") {
+        if self.input().starts_with('(') {
             self.parse_tuple_or_parenthesised_type()
         } else {
             let loc = self.loc;
@@ -388,7 +386,7 @@ impl Parser {
 
                 // If the next char is ".", we have parsed a namespace.
                 // Otherwise we've parsed a type variable.
-                if self.input().starts_with(".") {
+                if self.input().starts_with('.') {
                     self.eat(".")?;
 
                     while self.input().starts_with('_') {
@@ -919,22 +917,20 @@ impl Parser {
                 return Ok(Pattern::Wildcard {
                     loc: (loc, self.loc),
                 });
+            } else if self.input().starts_with('.') {
+                // We're parsing a namespaced constructor
+                self.eat(".")?;
+                let namespace = Some(name.into());
+                return self.parse_ctor_pattern(namespace, loc);
             } else {
-                if self.input().starts_with('.') {
-                    // We're parsing a namespaced constructor
-                    self.eat(".")?;
-                    let namespace = Some(name.into());
-                    return self.parse_ctor_pattern(namespace, loc);
-                } else {
-                    return Ok(Pattern::Var {
-                        loc: (loc, self.loc),
-                        name,
-                    });
-                }
+                return Ok(Pattern::Var {
+                    loc: (loc, self.loc),
+                    name,
+                });
             }
         }
 
-        if self.input().starts_with("[") {
+        if self.input().starts_with('[') {
             let loc = self.loc;
             self.eat("[")?;
             let mut elems = vec![];
@@ -1036,25 +1032,23 @@ impl Parser {
                 return Ok(Pattern::Wildcard {
                     loc: (loc, self.loc),
                 });
+            } else if self.input().starts_with('.') {
+                // We're parsing a namespaced constructor
+                self.eat(".")?;
+                let namespace = Some(name.into());
+                let name = self.parse_upper_ident()?;
+                self.trim();
+                return Ok(Pattern::Constructor {
+                    loc: (loc, self.loc),
+                    namespace,
+                    name,
+                    args: vec![],
+                });
             } else {
-                if self.input().starts_with('.') {
-                    // We're parsing a namespaced constructor
-                    self.eat(".")?;
-                    let namespace = Some(name.into());
-                    let name = self.parse_upper_ident()?;
-                    self.trim();
-                    return Ok(Pattern::Constructor {
-                        loc: (loc, self.loc),
-                        namespace,
-                        name,
-                        args: vec![],
-                    });
-                } else {
-                    return Ok(Pattern::Var {
-                        loc: (loc, self.loc),
-                        name,
-                    });
-                }
+                return Ok(Pattern::Var {
+                    loc: (loc, self.loc),
+                    name,
+                });
             }
         }
         if self.input().starts_with('(') {
@@ -1217,11 +1211,11 @@ impl Parser {
 }
 
 fn lower_ident_char(c: char) -> bool {
-    c == '_' || ('a'..='z').contains(&c)
+    c == '_' || c.is_ascii_lowercase()
 }
 
 fn upper_ident_char(c: char) -> bool {
-    c == '_' || ('A'..='Z').contains(&c)
+    c == '_' || c.is_ascii_uppercase()
 }
 
 fn alphanum_or_underscore_char(c: char) -> bool {
@@ -1233,7 +1227,7 @@ fn whitespace_char(c: char) -> bool {
 }
 
 fn numeric_char(c: char) -> bool {
-    ('0'..='9').contains(&c)
+    c.is_ascii_digit()
 }
 
 fn operator_char(c: char) -> bool {

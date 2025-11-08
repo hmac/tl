@@ -135,7 +135,7 @@ pub fn print_error<E: Display + HasLoc, W: std::io::Write>(
         writer,
         "     {} {}",
         " ".repeat(start_col),
-        error.to_string()
+        error
     )
     .unwrap();
 }
@@ -504,7 +504,7 @@ impl Expr {
                 let mut vars: HashSet<&String> =
                     elems.iter().flat_map(Self::free_variables).collect();
                 if let Some(tail) = tail {
-                    vars = vars.union(&tail.free_variables()).map(|x| *x).collect();
+                    vars = vars.union(&tail.free_variables()).copied().collect();
                 }
                 vars
             }
@@ -540,11 +540,9 @@ impl Expr {
                         .union(
                             &b.value
                                 .free_variables()
-                                .difference(&bound_vars)
-                                .map(|v| *v)
+                                .difference(&bound_vars).copied()
                                 .collect(),
-                        )
-                        .map(|v| *v)
+                        ).copied()
                         .collect();
                     bound_vars.insert(&b.name);
                 }
@@ -552,11 +550,9 @@ impl Expr {
                     .union(
                         &body
                             .free_variables()
-                            .difference(&bound_vars)
-                            .map(|v| *v)
+                            .difference(&bound_vars).copied()
                             .collect(),
-                    )
-                    .map(|v| *v)
+                    ).copied()
                     .collect();
                 free_vars
             }
@@ -671,7 +667,7 @@ impl Pattern {
             Pattern::ListCons { elems, tail, .. } => {
                 let mut vars: HashSet<&String> = elems.iter().flat_map(Self::vars).collect();
                 if let Some(tail) = tail {
-                    vars = vars.union(&tail.vars()).map(|x| *x).collect();
+                    vars = vars.union(&tail.vars()).copied().collect();
                 }
                 vars
             }
