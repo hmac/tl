@@ -324,7 +324,7 @@ impl Vm {
                                 );
                                 // Push the already-applied args onto the stack
                                 for arg in args.into_iter().rev() {
-                                    stack.push(arg.clone().to_stack_value());
+                                    stack.push(rc_value_to_stack_value(arg.clone()));
                                 }
                                 let frame = (
                                     *current_func_block_id,
@@ -387,7 +387,7 @@ impl Vm {
                                     // Then we push the already-applied args onto the stack
                                     for arg in args.into_iter().rev() {
                                         // TODO: remove this clone?
-                                        stack.push(arg.clone().to_stack_value());
+                                        stack.push(rc_value_to_stack_value(arg.clone()));
                                     }
 
                                     // Then we push the additional args supplied in this call
@@ -418,7 +418,7 @@ impl Vm {
                                     // Push the new args and put the function back on the stack
                                     let mut new_args = vec![];
                                     for a in args {
-                                        new_args.push(Rc::new(a.clone()))
+                                        new_args.push(a.clone())
                                     }
                                     for _ in 0..len {
                                         new_args
@@ -966,10 +966,7 @@ impl StackValue {
             Self::Char(c) => Value::Char(c),
             Self::Bool(b) => Value::Bool(b),
             Self::ListNil => Value::ListNil,
-            Self::Func { props, args } => Value::Func {
-                props,
-                args: args.into_iter().map(|a| (*a).clone()).collect(),
-            },
+            Self::Func { props, args } => Value::Func { props, args },
             Self::HeapValue(v) => {
                 // Note: for simplicity at the moment, we do not store Rc refs to heap values
                 // inside other heap values. We instead copy them. We can change this, but
@@ -1091,7 +1088,7 @@ pub enum Value {
     ListNil,
     Func {
         props: Rc<FuncProperties>,
-        args: Vec<Value>,
+        args: Vec<Rc<Value>>,
     },
     // TODO: can we remove this?
     Operator {
@@ -1108,6 +1105,11 @@ impl Value {
     pub fn to_stack_value(self) -> StackValue {
         match self {
             Value::ListNil => StackValue::ListNil,
+            Value::Int(n) => StackValue::Int(n),
+            Value::Char(c) => StackValue::Char(c),
+            Value::Bool(b) => StackValue::Bool(b),
+            Value::Func { props, args } => StackValue::Func { props, args },
+            // variants which don't have a stack analogue
             _ => StackValue::HeapValue(Rc::new(self)),
         }
     }
@@ -1119,6 +1121,9 @@ impl Value {
 fn rc_value_to_stack_value(v: Rc<Value>) -> StackValue {
     match &*v {
         Value::ListNil => StackValue::ListNil,
+        Value::Int(n) => StackValue::Int(*n),
+        Value::Char(c) => StackValue::Char(*c),
+        Value::Bool(b) => StackValue::Bool(*b),
         _ => StackValue::HeapValue(v.clone()),
     }
 }
