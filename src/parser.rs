@@ -101,7 +101,7 @@ impl Parser {
     }
 
     fn try_eat(&mut self, s: &'static str) -> Option<()> {
-        if self.input().starts_with(&s) {
+        if self.input().starts_with(s) {
             self.loc += s.len();
             Some(())
         } else {
@@ -314,7 +314,7 @@ impl Parser {
         let loc = self.loc;
         self.eat("(")?;
         self.trim();
-        if self.input().starts_with(",") {
+        if self.input().starts_with(',') {
             // We are parsing unit (,) or there's a parse error
             self.eat(",")?;
             self.trim();
@@ -324,11 +324,11 @@ impl Parser {
                 elems: vec![],
             };
             self.trim();
-            return Ok(r);
+            Ok(r)
         } else {
             let elem1 = self.parse_type()?;
             self.trim();
-            if self.input().starts_with(")") {
+            if self.input().starts_with(')') {
                 // We've parsed a parenthesised expression
                 self.eat(")")?;
                 self.trim();
@@ -338,12 +338,12 @@ impl Parser {
                 let mut elems = vec![elem1];
                 loop {
                     self.trim();
-                    if self.input().starts_with(")") {
+                    if self.input().starts_with(')') {
                         break;
                     }
                     self.eat(",")?;
                     self.trim();
-                    if self.input().starts_with(")") {
+                    if self.input().starts_with(')') {
                         break;
                     }
                     elems.push(self.parse_type()?);
@@ -368,7 +368,7 @@ impl Parser {
     // some_import.Foo
     fn parse_type_nested(&mut self) -> Result<SourceType, Error> {
         if self.input().starts_with("(") {
-            return self.parse_tuple_or_parenthesised_type();
+            self.parse_tuple_or_parenthesised_type()
         } else {
             let loc = self.loc;
 
@@ -613,16 +613,16 @@ impl Parser {
         if self.input().starts_with("let") {
             return self.parse_let().map(Some);
         }
-        if self.input().starts_with("[") {
+        if self.input().starts_with('[') {
             return self.parse_list().map(Some);
         }
-        if self.input().starts_with("\"") {
+        if self.input().starts_with('"') {
             return self.parse_string().map(Some);
         }
-        if self.input().starts_with("'") {
+        if self.input().starts_with('\'') {
             return self.parse_char().map(Some);
         }
-        if self.input().starts_with("(") {
+        if self.input().starts_with('(') {
             // The expression could be a tuple or a parenthesised expression
             return self.parse_tuple_or_parenthesised_expression().map(Some);
         }
@@ -662,7 +662,7 @@ impl Parser {
         let loc = self.loc;
         self.eat("(")?;
         self.trim();
-        if self.input().starts_with(",") {
+        if self.input().starts_with(',') {
             // We are parsing unit (,) or there's a parse error
             self.eat(",")?;
             self.trim();
@@ -672,11 +672,11 @@ impl Parser {
                 elems: vec![],
             };
             self.trim();
-            return Ok(r);
+            Ok(r)
         } else {
             let elem1 = self.parse_expr()?;
             self.trim();
-            if self.input().starts_with(")") {
+            if self.input().starts_with(')') {
                 // We've parsed a parenthesised expression
                 self.eat(")")?;
                 self.trim();
@@ -686,12 +686,12 @@ impl Parser {
                 let mut elems = vec![elem1];
                 loop {
                     self.trim();
-                    if self.input().starts_with(")") {
+                    if self.input().starts_with(')') {
                         break;
                     }
                     self.eat(",")?;
                     self.trim();
-                    if self.input().starts_with(")") {
+                    if self.input().starts_with(')') {
                         break;
                     }
                     elems.push(self.parse_expr()?);
@@ -727,7 +727,7 @@ impl Parser {
             let s = format!("{}{n}", "_".repeat(leading_underscores));
 
             // If there's a dot, then we're parsing a namespaced constructor/variable
-            if self.input().starts_with(".") {
+            if self.input().starts_with('.') {
                 self.eat(".")?;
 
                 let namespace = s;
@@ -779,9 +779,9 @@ impl Parser {
         // then the result is a local variable.
         if leading_underscores > 0 {
             let s = "_".repeat(leading_underscores);
-            return Ok(Var::Local(s));
+            Ok(Var::Local(s))
         } else {
-            return Err(Error::ExpectedLowerIdent((loc, self.loc)));
+            Err(Error::ExpectedLowerIdent((loc, self.loc)))
         }
     }
 
@@ -793,7 +793,7 @@ impl Parser {
         let mut tail = None;
         loop {
             self.trim();
-            if self.input().starts_with("]") {
+            if self.input().starts_with(']') {
                 break;
             }
             if self.input().starts_with("..") {
@@ -822,7 +822,7 @@ impl Parser {
         self.trim();
         let mut bindings = vec![];
         loop {
-            if self.input().starts_with("{") {
+            if self.input().starts_with('{') {
                 break;
             }
             let loc = self.loc;
@@ -873,7 +873,7 @@ impl Parser {
         self.trim();
         let mut branches = vec![];
         loop {
-            if self.input().starts_with("}") {
+            if self.input().starts_with('}') {
                 break;
             }
             let branch = self.parse_match_branch()?;
@@ -920,7 +920,7 @@ impl Parser {
                     loc: (loc, self.loc),
                 });
             } else {
-                if self.input().starts_with(".") {
+                if self.input().starts_with('.') {
                     // We're parsing a namespaced constructor
                     self.eat(".")?;
                     let namespace = Some(name.into());
@@ -941,14 +941,14 @@ impl Parser {
             let mut tail = None;
             loop {
                 self.trim();
-                if self.input().starts_with(".") || self.input().starts_with("]") {
+                if self.input().starts_with('.') || self.input().starts_with(']') {
                     break;
                 }
                 elems.push(self.parse_pattern()?);
                 self.trim();
                 self.try_eat(",");
             }
-            if self.input().starts_with(".") {
+            if self.input().starts_with('.') {
                 self.eat("..")?;
                 tail = Some(Box::new(self.parse_pattern()?));
             }
@@ -967,13 +967,13 @@ impl Parser {
             }
         }
 
-        if self.input().starts_with("(") {
+        if self.input().starts_with('(') {
             let loc = self.loc;
             self.eat("(")?;
             let mut elems = vec![];
             loop {
                 self.trim();
-                if self.input().starts_with(")") {
+                if self.input().starts_with(')') {
                     break;
                 }
                 elems.push(self.parse_pattern()?);
@@ -1002,9 +1002,9 @@ impl Parser {
         let mut args = vec![];
         loop {
             if self.input().starts_with("->")
-                || self.input().starts_with("]")
-                || self.input().starts_with(",")
-                || self.input().starts_with(")")
+                || self.input().starts_with(']')
+                || self.input().starts_with(',')
+                || self.input().starts_with(')')
             {
                 break;
             }
@@ -1037,7 +1037,7 @@ impl Parser {
                     loc: (loc, self.loc),
                 });
             } else {
-                if self.input().starts_with(".") {
+                if self.input().starts_with('.') {
                     // We're parsing a namespaced constructor
                     self.eat(".")?;
                     let namespace = Some(name.into());
@@ -1057,7 +1057,7 @@ impl Parser {
                 }
             }
         }
-        if self.input().starts_with("(") {
+        if self.input().starts_with('(') {
             self.eat("(")?;
             self.trim();
             let pat = self.parse_pattern()?;
@@ -1122,7 +1122,7 @@ impl Parser {
         loop {
             if self.input().starts_with(upper_ident_char)
                 || self.input().starts_with(lower_ident_char)
-                || self.input().starts_with("(")
+                || self.input().starts_with('(')
             {
                 let arg = self.parse_type_nested()?;
                 self.trim();
@@ -1217,15 +1217,15 @@ impl Parser {
 }
 
 fn lower_ident_char(c: char) -> bool {
-    c == '_' || (c >= 'a' && c <= 'z')
+    c == '_' || ('a'..='z').contains(&c)
 }
 
 fn upper_ident_char(c: char) -> bool {
-    c == '_' || (c >= 'A' && c <= 'Z')
+    c == '_' || ('A'..='Z').contains(&c)
 }
 
 fn alphanum_or_underscore_char(c: char) -> bool {
-    c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+    lower_ident_char(c) || upper_ident_char(c) || numeric_char(c)
 }
 
 fn whitespace_char(c: char) -> bool {
@@ -1233,7 +1233,7 @@ fn whitespace_char(c: char) -> bool {
 }
 
 fn numeric_char(c: char) -> bool {
-    c >= '0' && c <= '9'
+    ('0'..='9').contains(&c)
 }
 
 fn operator_char(c: char) -> bool {

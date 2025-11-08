@@ -1469,14 +1469,14 @@ impl Typechecker {
         name: &GlobalName,
         loc: Loc,
     ) -> Result<Type, Error> {
-        match self.functions.get(&name) {
+        match self.functions.get(name) {
             Some((_, ty)) => {
                 // This function type may have type variables that we must instantiate.
                 let (ty, vars) = self.generate_fresh_type_variables(ty.clone(), type_variables);
                 for var in vars {
                     type_variables.insert(var, VarState::Unsolved);
                 }
-                Ok(ty.clone())
+                Ok(ty)
             }
             None => Err(Error::UnknownVariable(loc, name.to_string())),
         }
@@ -1496,7 +1496,7 @@ impl Typechecker {
             None => {
                 // Then look at top-level bindings in the current file
                 match self.lookup_global(type_variables, &GlobalName::named(path, name), loc) {
-                    Ok(ty) => Ok(ty.clone()),
+                    Ok(ty) => Ok(ty),
                     Err(_) => Err(Error::UnknownVariable(loc, name.to_string())),
                 }
             }
@@ -1811,6 +1811,7 @@ impl Typechecker {
 
     pub fn check_type(
         &self,
+        // TODO: not used, remove
         path: &Path,
         ty: &Type,
         loc: Loc,
@@ -1819,7 +1820,7 @@ impl Typechecker {
         // Check that all mentioned types exist.
         match ty {
             Type::Named(name) => {
-                if !self.types.contains_key(&name) {
+                if !self.types.contains_key(name) {
                     return Err(Error::UnknownType(loc, name.clone()));
                 }
             }
@@ -1899,7 +1900,7 @@ impl Typechecker {
             SourceType::Var(_, v) => Ok(Type::Var(v.to_string())),
             SourceType::Tuple { elems, .. } => Ok(Type::Tuple(
                 elems
-                    .into_iter()
+                    .iter()
                     .map(|e| self.type_from_source_type(path, e))
                     .collect::<Result<_, _>>()?,
             )),
@@ -1930,7 +1931,7 @@ impl Typechecker {
             };
         }
 
-        for a in constructor.arguments.iter().rev().cloned() {
+        for a in constructor.arguments.iter().rev() {
             ty = Type::Func(
                 Box::new(self.type_from_source_type(path, &a)?),
                 Box::new(ty),

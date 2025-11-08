@@ -28,6 +28,6 @@ impl<'a, T> LocalVariables<'a, T> {
     }
 
     pub fn extend(&'a self, stack: HashMap<String, T>) -> LocalVariables<'a, T> {
-        Self::More(stack, &self)
+        Self::More(stack, self)
     }
 }

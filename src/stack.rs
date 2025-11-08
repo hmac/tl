@@ -1,3 +1,4 @@
+// TODO: remove?
 #[derive(Clone, Debug)]
 pub struct Stack<T> {
     inner: Vec<T>,

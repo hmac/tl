@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 
-use tracing_subscriber;
-
-const USAGE: &'static str = "
+const USAGE: &str = "
 Usage:
   tl run <PATH> <FUNC>
   tl test <PATH>

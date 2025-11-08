@@ -79,7 +79,7 @@ impl Vm {
             "({}) {ip}: {:?} {} {:?}",
             block_id.0,
             instruction,
-            display_value_list(&stack),
+            display_value_list(stack),
             &frames
         );
         match instruction {
@@ -327,20 +327,20 @@ impl Vm {
                             let func_block_id = props.block_id;
                             let num_args = props.arg_names.len();
                             // Check if we've saturated the function
-                            if num_args as usize == args.len() + len {
+                            if num_args == args.len() + len {
                                 debug!(
                                     "func name={name} num_args={num_args} block_id={} (saturated)",
                                     func_block_id.0
                                 );
                                 // Push the already-applied args onto the stack
-                                for arg in args.into_iter().rev() {
+                                for arg in args.iter().rev() {
                                     stack.push(rc_value_to_stack_value(Rc::clone(arg)));
                                 }
                                 let frame = (
                                     *current_func_block_id,
                                     *block_id,
                                     ip + 1,
-                                    stack.len() - num_args as usize,
+                                    stack.len() - num_args,
                                 );
                                 frames.push(frame);
                                 // Jump to the function
@@ -381,7 +381,7 @@ impl Vm {
                                     // So first we pop all the args that the called function will
                                     // use.
 
-                                    let num_extra_args = num_args as usize - args.len();
+                                    let num_extra_args = num_args - args.len();
                                     let mut extra_args = vec![];
                                     for _ in 0..num_extra_args {
                                         extra_args.push(stack.pop().unwrap());
@@ -392,10 +392,10 @@ impl Vm {
                                     // Then we push the new len (len - num_args) onto the stack,
                                     // then push the args required to saturate the function
                                     // (arg0..argM).
-                                    stack.push(StackValue::Int((len - num_args as usize) as i64));
+                                    stack.push(StackValue::Int((len - num_args) as i64));
 
                                     // Then we push the already-applied args onto the stack
-                                    for arg in args.into_iter().rev() {
+                                    for arg in args.iter().rev() {
                                         stack.push(rc_value_to_stack_value(Rc::clone(arg)));
                                     }
 
@@ -411,7 +411,7 @@ impl Vm {
                                         *current_func_block_id,
                                         *block_id,
                                         ip,
-                                        stack.len() - num_args as usize,
+                                        stack.len() - num_args,
                                     );
 
                                     debug!("frame: {:?}", frame);
@@ -499,7 +499,7 @@ impl Vm {
                 // Match the top of the stack against each pattern
                 // If there's a match, jump to the corresponding location
                 let target = stack.pop().expect("case: empty stack");
-                match eval_case(target, &branches) {
+                match eval_case(target, branches) {
                     Some((jump_amount, bindings)) => {
                         // Push any values bound by the pattern
                         for v in bindings {
@@ -524,7 +524,7 @@ impl Vm {
                 if let Some((caller_func_block_id, caller_block_id, caller_addr, frame_index)) =
                     frames.pop()
                 {
-                    debug!("ret caller_func_block_id={}, caller_block_id={} caller_addr={caller_addr} frame_index={frame_index} stack={} result={result}", caller_func_block_id.0, caller_block_id.0, display_value_list(&stack));
+                    debug!("ret caller_func_block_id={}, caller_block_id={} caller_addr={caller_addr} frame_index={frame_index} stack={} result={result}", caller_func_block_id.0, caller_block_id.0, display_value_list(stack));
                     stack.truncate(frame_index);
                     stack.push(result);
 
@@ -569,7 +569,7 @@ impl Vm {
         let func_block_id = props.block_id;
         let num_args = props.arg_names.len();
         // Check if we've saturated the function
-        if num_args as usize == args.len() + len {
+        if num_args == args.len() + len {
             debug!(
                 "func name={name} num_args={num_args} block_id={} (saturated)",
                 func_block_id.0
@@ -582,7 +582,7 @@ impl Vm {
                 *current_func_block_id,
                 *block_id,
                 *instruction_ptr + 1,
-                stack.len() - num_args as usize,
+                stack.len() - num_args,
             );
             frames.push(frame);
             // Jump to the function
@@ -591,7 +591,7 @@ impl Vm {
             *block = self.prog.get_block(func_block_id);
             *instruction_ptr = 0;
         } else {
-            if (num_args as usize) < args.len() + len {
+            if num_args < args.len() + len {
                 debug!(
                     "func name={name} num_args={num_args} block_id={} (oversaturated)",
                     func_block_id.0
@@ -623,7 +623,7 @@ impl Vm {
                 // So first we pop all the args that the called function will
                 // use.
 
-                let num_extra_args = num_args as usize - args.len();
+                let num_extra_args = num_args - args.len();
                 let mut extra_args = vec![];
                 for _ in 0..num_extra_args {
                     extra_args.push(stack.pop().unwrap());
@@ -634,7 +634,7 @@ impl Vm {
                 // Then we push the new len (len - num_args) onto the stack,
                 // then push the args required to saturate the function
                 // (arg0..argM).
-                stack.push(StackValue::Int((len - num_args as usize) as i64));
+                stack.push(StackValue::Int((len - num_args) as i64));
 
                 // Then we push the already-applied args onto the stack
                 for arg in args.into_iter().rev() {
@@ -653,7 +653,7 @@ impl Vm {
                     *current_func_block_id,
                     *block_id,
                     *instruction_ptr,
-                    stack.len() - num_args as usize,
+                    stack.len() - num_args,
                 );
 
                 debug!("frame: {:?}", frame);
@@ -787,16 +787,16 @@ fn match_pattern(target: StackValue, pattern: &Pattern) -> Option<Vec<StackValue
                     if elems.is_empty() {
                         None
                     } else {
-                        let mut xs: Rc<Value> = Rc::clone(&xs_);
+                        let mut xs: Rc<Value> = Rc::clone(xs_);
                         // Match x with the first pattern in `elems`
                         let p1 = &elems[0];
-                        let mut elem_matches = match_pattern(StackValue::clone(x), &p1)?;
+                        let mut elem_matches = match_pattern(StackValue::clone(x), p1)?;
                         // Match each element in `xs` with the coresponding patterns in `elems`
                         for p in elems.iter().skip(1) {
                             match *xs {
                                 Value::ListCons(ref y, ref ys) => {
                                     elem_matches
-                                        .append(&mut match_pattern(StackValue::clone(y), &p)?);
+                                        .append(&mut match_pattern(StackValue::clone(y), p)?);
                                     xs = Rc::clone(ys);
                                 }
                                 _ => {
@@ -807,7 +807,7 @@ fn match_pattern(target: StackValue, pattern: &Pattern) -> Option<Vec<StackValue
                         // Match the remaining `xs` with `tail`, if it exists.
                         // Otherwise, match `xs` with ListNil
                         if let Some(tail) = tail {
-                            let mut tail_match = match_pattern_heap(&xs, &tail)?;
+                            let mut tail_match = match_pattern_heap(&xs, tail)?;
                             elem_matches.append(&mut tail_match);
                         } else {
                             if *xs != Value::ListNil {
@@ -865,8 +865,8 @@ fn match_pattern_heap(target: &Rc<Value>, pattern: &Pattern) -> Option<Vec<Stack
                 if name == target_name {
                     assert_eq!(args.len(), target_args.len());
                     let mut bindings = vec![];
-                    for (val, pattern) in target_args.into_iter().zip(args) {
-                        if let Some(mut new_bindings) = match_pattern_heap(&val, pattern) {
+                    for (val, pattern) in target_args.iter().zip(args) {
+                        if let Some(mut new_bindings) = match_pattern_heap(val, pattern) {
                             bindings.append(&mut new_bindings);
                         } else {
                             return None;
@@ -897,15 +897,15 @@ fn match_pattern_heap(target: &Rc<Value>, pattern: &Pattern) -> Option<Vec<Stack
                 if elems.is_empty() {
                     None
                 } else {
-                    let mut xs = Rc::clone(&xs_);
+                    let mut xs = Rc::clone(xs_);
                     // Match x with the first pattern in `elems`
                     let p1 = &elems[0];
-                    let mut elem_matches = match_pattern(StackValue::clone(x), &p1)?;
+                    let mut elem_matches = match_pattern(StackValue::clone(x), p1)?;
                     // Match each element in `xs` with the coresponding patterns in `elems`
                     for p in elems.iter().skip(1) {
                         match *xs {
                             Value::ListCons(ref y, ref ys) => {
-                                elem_matches.append(&mut match_pattern(StackValue::clone(y), &p)?);
+                                elem_matches.append(&mut match_pattern(StackValue::clone(y), p)?);
                                 xs = Rc::clone(ys);
                             }
                             _ => {
@@ -916,7 +916,7 @@ fn match_pattern_heap(target: &Rc<Value>, pattern: &Pattern) -> Option<Vec<Stack
                     // Match the remaining `xs` with `tail`, if it exists.
                     // Otherwise, match `xs` with ListNil
                     if let Some(tail) = tail {
-                        let mut tail_match = match_pattern_heap(&xs, &tail)?;
+                        let mut tail_match = match_pattern_heap(&xs, tail)?;
                         elem_matches.append(&mut tail_match);
                     } else {
                         if *xs != Value::ListNil {
@@ -973,7 +973,7 @@ impl StackValue {
                 props: Rc::clone(props),
                 args: args.iter().map(Rc::clone).collect(),
             }),
-            Self::HeapValue(v) => Rc::clone(&v),
+            Self::HeapValue(v) => Rc::clone(v),
         }
     }
 
@@ -1103,6 +1103,7 @@ pub enum Value {
 }
 
 impl Value {
+    // consumes self: consider rename to into_stack_value
     pub fn to_stack_value(self) -> StackValue {
         match self {
             Value::ListNil => StackValue::ListNil,
@@ -1199,7 +1200,7 @@ fn display_value_list(list: &Vec<StackValue>) -> String {
             r.push_str(", ");
         }
     }
-    r.push_str("]");
+    r.push(']');
     r
 }
 
@@ -1221,7 +1222,7 @@ impl std::fmt::Display for Value {
                 }
                 Ok(())
             }
-            Value::ListCons(head, tail) => display_nonempty_list(f, &head, &tail),
+            Value::ListCons(head, tail) => display_nonempty_list(f, head, tail),
             Value::ListNil => write!(f, "[]"),
             Value::Tuple(elems) => {
                 if elems.is_empty() {
@@ -1248,7 +1249,7 @@ fn display_constructor_arg(
     arg: &Value,
 ) -> Result<(), std::fmt::Error> {
     match arg {
-        Value::Constructor { args, .. } if args.len() > 0 => write!(f, "({})", arg),
+        Value::Constructor { args, .. } if !args.is_empty() => write!(f, "({})", arg),
         _ => write!(f, "{}", arg),
     }
 }
@@ -1261,14 +1262,14 @@ fn display_nonempty_list<'a>(
     write!(f, "[")?;
     loop {
         write!(f, "{}", head)?;
-        match &*tail {
+        match tail {
             Value::ListNil => {
                 break;
             }
             Value::ListCons(h, t) => {
                 write!(f, ", ")?;
-                head = &*h;
-                tail = &*t;
+                head = h;
+                tail = t.as_ref();
             }
             t => unreachable!("{:?}", t),
         }

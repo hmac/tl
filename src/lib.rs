@@ -111,7 +111,7 @@ impl<'a> Runner<'a> {
                         } => {
                             let abs_path = match path.parent() {
                                 None => import_path.into(),
-                                Some(dir) => match dir.join(&import_path).canonicalize() {
+                                Some(dir) => match dir.join(import_path).canonicalize() {
                                     Ok(p) => Ok(p),
                                     Err(e) => {
                                         writeln!(self.output, "Error:\n")?;
@@ -142,9 +142,9 @@ impl<'a> Runner<'a> {
                         } => {
                             if let Err(error) = self.typechecker.register_type(
                                 &path,
-                                &name,
-                                &params,
-                                &constructors,
+                                name,
+                                params,
+                                constructors,
                                 *loc,
                             ) {
                                 writeln!(self.output, "Error:\n")?;
@@ -168,7 +168,7 @@ impl<'a> Runner<'a> {
                             name, r#type, loc, ..
                         } => {
                             if let Err(error) =
-                                self.typechecker.register_func(&path, &name, &r#type, *loc)
+                                self.typechecker.register_func(&path, name, r#type, *loc)
                             {
                                 writeln!(self.output, "Error:\n")?;
                                 ast::print_error(
@@ -194,7 +194,7 @@ impl<'a> Runner<'a> {
                 for decl in &ast {
                     match decl {
                         Decl::Func { r#type, body, .. } => {
-                            if let Err(error) = self.typechecker.check_func(&path, &body, &r#type) {
+                            if let Err(error) = self.typechecker.check_func(&path, body, &r#type) {
                                 writeln!(self.output, "Error:\n")?;
                                 ast::print_error(
                                     &mut self.output,
@@ -208,7 +208,7 @@ impl<'a> Runner<'a> {
                         Decl::Test { name, body, .. } => {
                             if let Err(error) = self.typechecker.check_func(
                                 &path,
-                                &body,
+                                body,
                                 &ast::SourceType::Bool((0, 0)),
                             ) {
                                 writeln!(self.output, "Error in test {name}:\n")?;
@@ -225,7 +225,7 @@ impl<'a> Runner<'a> {
                     }
                 }
 
-                self.files.insert(path.into(), ast);
+                self.files.insert(path, ast);
 
                 // We compile the root file after loading and typechecking all imports is done.
 
@@ -247,7 +247,7 @@ impl<'a> Runner<'a> {
             for decl in ast {
                 match decl {
                     Decl::Func { name, body, .. } => {
-                        compiler.compile_func(path, &name, &body).unwrap();
+                        compiler.compile_func(path, name, body).unwrap();
                     }
                     Decl::Test { name, body, .. } => {
                         // Test names may overlap with function names, so do some hacky
@@ -371,7 +371,7 @@ impl<'a> Runner<'a> {
     }
 }
 
-fn print_debug_state<'a>(vm: &Vm, state: &RunState<'a>) {
+fn print_debug_state(vm: &Vm, state: &RunState) {
     let stack = &state.stack;
 
     let mut stack_lines = print_stack(stack).into_iter();
@@ -427,9 +427,9 @@ fn print_stack(stack: &[StackValue]) -> Vec<String> {
     fn draw_stack_top(width: usize, result: &mut Vec<String>) {
         let mut s = "┌".to_string();
         for _ in 0..width {
-            s.push_str("─");
+            s.push('─');
         }
-        s.push_str("┐");
+        s.push('┐');
         result.push(s);
     }
 
@@ -440,19 +440,19 @@ fn print_stack(stack: &[StackValue]) -> Vec<String> {
     fn draw_stack_mid(width: usize, result: &mut Vec<String>) {
         let mut s = "├".to_string();
         for _ in 0..width {
-            s.push_str("─");
+            s.push('─');
         }
-        s.push_str("┤");
-        result.push(format!("{}", s));
+        s.push('┤');
+        result.push(s.to_string());
     }
 
     fn draw_stack_bottom(width: usize, result: &mut Vec<String>) {
         let mut s = "└".to_string();
         for _ in 0..width {
-            s.push_str("─");
+            s.push('─');
         }
-        s.push_str("┘");
-        result.push(format!("{}", s));
+        s.push('┘');
+        result.push(s.to_string());
     }
 
     let max = 10;
