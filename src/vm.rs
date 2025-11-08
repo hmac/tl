@@ -1,3 +1,5 @@
+#![warn(clippy::clone_on_ref_ptr)]
+
 use std::{collections::HashMap, rc::Rc};
 
 use tracing::{debug, error};
@@ -210,7 +212,7 @@ impl Vm {
                 }
                 let props = self.functions.get(v).unwrap();
                 let val = Value::Func {
-                    props: props.clone(),
+                    props: Rc::clone(props),
                     args: vec![],
                 };
                 stack.push(val.to_stack_value());
@@ -235,7 +237,7 @@ impl Vm {
                     dbg!(&frames);
                     dbg!(&stack);
                 }
-                let val = stack[frame_index + v].clone();
+                let val = StackValue::clone(&stack[frame_index + v]);
 
                 stack.push(val);
                 *instruction_ptr += 1;
@@ -262,7 +264,9 @@ impl Vm {
                 }
                 let mut list = match stack.pop().expect("MakeList: empty stack") {
                     StackValue::HeapValue(v) => match &*v {
-                        Value::ListCons(x, rest) => Value::ListCons(x.clone(), rest.clone()),
+                        Value::ListCons(x, rest) => {
+                            Value::ListCons(StackValue::clone(x), Rc::clone(rest))
+                        }
                         Value::ListNil => Value::ListNil,
                         bad => unreachable!("make_list: arg is not list: {:?}", bad),
                     },
@@ -292,7 +296,7 @@ impl Vm {
             Instruction::Ctor(c, len) => {
                 let mut args: Vec<Rc<Value>> = stack
                     .split_off(stack.len() - *len as usize)
-                    .into_iter()
+                    .iter()
                     .map(StackValue::to_heap_value_rc)
                     .collect();
                 args.reverse();
@@ -330,7 +334,7 @@ impl Vm {
                                 );
                                 // Push the already-applied args onto the stack
                                 for arg in args.into_iter().rev() {
-                                    stack.push(rc_value_to_stack_value(arg.clone()));
+                                    stack.push(rc_value_to_stack_value(Rc::clone(arg)));
                                 }
                                 let frame = (
                                     *current_func_block_id,
@@ -392,7 +396,7 @@ impl Vm {
 
                                     // Then we push the already-applied args onto the stack
                                     for arg in args.into_iter().rev() {
-                                        stack.push(rc_value_to_stack_value(arg.clone()));
+                                        stack.push(rc_value_to_stack_value(Rc::clone(arg)));
                                     }
 
                                     // Then we push the additional args supplied in this call
@@ -423,13 +427,13 @@ impl Vm {
                                     // Push the new args and put the function back on the stack
                                     let mut new_args = vec![];
                                     for a in args {
-                                        new_args.push(a.clone())
+                                        new_args.push(Rc::clone(a))
                                     }
                                     for _ in 0..len {
                                         new_args.push(stack.pop().unwrap().to_heap_value_rc());
                                     }
                                     stack.push(StackValue::Func {
-                                        props: props.clone(),
+                                        props: Rc::clone(props),
                                         args: new_args,
                                     });
                                     *instruction_ptr += 1;
@@ -438,12 +442,13 @@ impl Vm {
                         }
                         Value::Constructor { name, args } => {
                             // Push the new args onto the constructor
-                            let mut new_args = args.clone();
+                            let mut new_args: Vec<Rc<Value>> = args.iter().map(Rc::clone).collect();
                             for _ in 0..len {
                                 new_args.push(stack.pop().unwrap().to_heap_value_rc());
                             }
                             stack.push(
                                 Value::Constructor {
+                                    // TODO: remove clone
                                     name: name.clone(),
                                     args: new_args,
                                 }
@@ -494,13 +499,11 @@ impl Vm {
                 // Match the top of the stack against each pattern
                 // If there's a match, jump to the corresponding location
                 let target = stack.pop().expect("case: empty stack");
-                // target is a StackValue so this clone is cheap
-                match eval_case(target.clone(), &branches) {
+                match eval_case(target, &branches) {
                     Some((jump_amount, bindings)) => {
-                        debug!("case: {target:?} {bindings:?}");
                         // Push any values bound by the pattern
                         for v in bindings {
-                            stack.push(v.clone());
+                            stack.push(v);
                         }
 
                         // Jump forward to the branch
@@ -666,13 +669,13 @@ impl Vm {
                 // Push the new args and put the function back on the stack
                 let mut new_args = vec![];
                 for a in args {
-                    new_args.push(a.clone())
+                    new_args.push(Rc::clone(&a))
                 }
                 for _ in 0..len {
                     new_args.push(stack.pop().unwrap().to_heap_value_rc());
                 }
                 stack.push(StackValue::Func {
-                    props: props.clone(),
+                    props: Rc::clone(&props),
                     args: new_args,
                 });
                 *instruction_ptr += 1;
@@ -697,9 +700,9 @@ fn eval_case(
     branches: &[(Pattern, usize)],
 ) -> Option<(usize, Vec<StackValue>)> {
     for (pattern, jump_amount) in branches {
-        // target is a StackValue, so cheap to clone
-        match match_pattern(target.clone(), pattern) {
+        match match_pattern(StackValue::clone(&target), pattern) {
             Some(bound_values) => {
+                debug!("case: {target:?} {bound_values:?}");
                 return Some((*jump_amount, bound_values));
             }
             None => {}
@@ -784,16 +787,17 @@ fn match_pattern(target: StackValue, pattern: &Pattern) -> Option<Vec<StackValue
                     if elems.is_empty() {
                         None
                     } else {
-                        let mut xs: &Value = &xs_;
+                        let mut xs: Rc<Value> = Rc::clone(&xs_);
                         // Match x with the first pattern in `elems`
                         let p1 = &elems[0];
-                        let mut elem_matches = match_pattern(x.clone(), &p1)?;
+                        let mut elem_matches = match_pattern(StackValue::clone(x), &p1)?;
                         // Match each element in `xs` with the coresponding patterns in `elems`
                         for p in elems.iter().skip(1) {
-                            match xs {
-                                Value::ListCons(y, ys) => {
-                                    elem_matches.append(&mut match_pattern(y.clone(), &p)?);
-                                    xs = &ys;
+                            match *xs {
+                                Value::ListCons(ref y, ref ys) => {
+                                    elem_matches
+                                        .append(&mut match_pattern(StackValue::clone(y), &p)?);
+                                    xs = Rc::clone(ys);
                                 }
                                 _ => {
                                     return None;
@@ -803,7 +807,7 @@ fn match_pattern(target: StackValue, pattern: &Pattern) -> Option<Vec<StackValue
                         // Match the remaining `xs` with `tail`, if it exists.
                         // Otherwise, match `xs` with ListNil
                         if let Some(tail) = tail {
-                            let mut tail_match = match_pattern_heap(xs, &tail)?;
+                            let mut tail_match = match_pattern_heap(&xs, &tail)?;
                             elem_matches.append(&mut tail_match);
                         } else {
                             if *xs != Value::ListNil {
@@ -837,9 +841,9 @@ fn match_pattern(target: StackValue, pattern: &Pattern) -> Option<Vec<StackValue
 }
 
 // TODO: avoid cloning here
-fn match_pattern_heap(target: &Value, pattern: &Pattern) -> Option<Vec<StackValue>> {
+fn match_pattern_heap(target: &Rc<Value>, pattern: &Pattern) -> Option<Vec<StackValue>> {
     match pattern {
-        Pattern::Constructor { name, args, .. } => match target {
+        Pattern::Constructor { name, args, .. } => match **target {
             Value::Bool(true) => {
                 if name == "True" {
                     Some(vec![])
@@ -855,14 +859,14 @@ fn match_pattern_heap(target: &Value, pattern: &Pattern) -> Option<Vec<StackValu
                 }
             }
             Value::Constructor {
-                name: target_name,
-                args: target_args,
+                name: ref target_name,
+                args: ref target_args,
             } => {
                 if name == target_name {
                     assert_eq!(args.len(), target_args.len());
                     let mut bindings = vec![];
                     for (val, pattern) in target_args.into_iter().zip(args) {
-                        if let Some(mut new_bindings) = match_pattern_heap(val, pattern) {
+                        if let Some(mut new_bindings) = match_pattern_heap(&val, pattern) {
                             bindings.append(&mut new_bindings);
                         } else {
                             return None;
@@ -875,35 +879,34 @@ fn match_pattern_heap(target: &Value, pattern: &Pattern) -> Option<Vec<StackValu
             }
             _ => unreachable!("pattern={pattern:?} target={target:?}"),
         },
-        // TODO: remove this clone
-        Pattern::Var { .. } => Some(vec![StackValue::HeapValue(Rc::new(target.clone()))]),
-        Pattern::Int { value, .. } => match target {
-            Value::Int(n) if n == value => Some(vec![]),
+        Pattern::Var { .. } => Some(vec![StackValue::HeapValue(Rc::clone(target))]),
+        Pattern::Int { value, .. } => match **target {
+            Value::Int(n) if n == *value => Some(vec![]),
             _ => None,
         },
         Pattern::Wildcard { .. } => Some(vec![]),
         Pattern::ListNil { .. } => {
-            if target == &Value::ListNil {
+            if **target == Value::ListNil {
                 Some(vec![])
             } else {
                 None
             }
         }
-        Pattern::ListCons { elems, tail, .. } => match target {
-            Value::ListCons(x, xs_) => {
+        Pattern::ListCons { elems, tail, .. } => match **target {
+            Value::ListCons(ref x, ref xs_) => {
                 if elems.is_empty() {
                     None
                 } else {
-                    let mut xs: &Value = &xs_;
+                    let mut xs = Rc::clone(&xs_);
                     // Match x with the first pattern in `elems`
                     let p1 = &elems[0];
-                    let mut elem_matches = match_pattern(x.clone(), &p1)?;
+                    let mut elem_matches = match_pattern(StackValue::clone(x), &p1)?;
                     // Match each element in `xs` with the coresponding patterns in `elems`
                     for p in elems.iter().skip(1) {
-                        match xs {
-                            Value::ListCons(y, ys) => {
-                                elem_matches.append(&mut match_pattern(y.clone(), &p)?);
-                                xs = &ys;
+                        match *xs {
+                            Value::ListCons(ref y, ref ys) => {
+                                elem_matches.append(&mut match_pattern(StackValue::clone(y), &p)?);
+                                xs = Rc::clone(ys);
                             }
                             _ => {
                                 return None;
@@ -913,7 +916,7 @@ fn match_pattern_heap(target: &Value, pattern: &Pattern) -> Option<Vec<StackValu
                     // Match the remaining `xs` with `tail`, if it exists.
                     // Otherwise, match `xs` with ListNil
                     if let Some(tail) = tail {
-                        let mut tail_match = match_pattern_heap(xs, &tail)?;
+                        let mut tail_match = match_pattern_heap(&xs, &tail)?;
                         elem_matches.append(&mut tail_match);
                     } else {
                         if *xs != Value::ListNil {
@@ -925,8 +928,8 @@ fn match_pattern_heap(target: &Value, pattern: &Pattern) -> Option<Vec<StackValu
             }
             _ => None,
         },
-        Pattern::Tuple { elems, .. } => match target {
-            Value::Tuple(xs) => {
+        Pattern::Tuple { elems, .. } => match **target {
+            Value::Tuple(ref xs) => {
                 // Match each element in `xs` with the coresponding pattern in `elems`
                 let mut matches = vec![];
                 for (p, x) in elems.iter().zip(xs.iter()) {
@@ -960,14 +963,17 @@ pub enum StackValue {
 }
 
 impl StackValue {
-    pub fn to_heap_value_rc(self) -> Rc<Value> {
+    pub fn to_heap_value_rc(&self) -> Rc<Value> {
         match self {
-            Self::Int(n) => Rc::new(Value::Int(n)),
-            Self::Char(c) => Rc::new(Value::Char(c)),
-            Self::Bool(b) => Rc::new(Value::Bool(b)),
+            Self::Int(n) => Rc::new(Value::Int(*n)),
+            Self::Char(c) => Rc::new(Value::Char(*c)),
+            Self::Bool(b) => Rc::new(Value::Bool(*b)),
             Self::ListNil => Rc::new(Value::ListNil),
-            Self::Func { props, args } => Rc::new(Value::Func { props, args }),
-            Self::HeapValue(v) => v.clone(),
+            Self::Func { props, args } => Rc::new(Value::Func {
+                props: Rc::clone(props),
+                args: args.iter().map(Rc::clone).collect(),
+            }),
+            Self::HeapValue(v) => Rc::clone(&v),
         }
     }
 
@@ -1119,7 +1125,7 @@ fn rc_value_to_stack_value(v: Rc<Value>) -> StackValue {
         Value::Int(n) => StackValue::Int(*n),
         Value::Char(c) => StackValue::Char(*c),
         Value::Bool(b) => StackValue::Bool(*b),
-        _ => StackValue::HeapValue(v.clone()),
+        _ => StackValue::HeapValue(Rc::clone(&v)),
     }
 }
 
