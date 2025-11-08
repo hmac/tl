@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use ast::{Decl, GlobalName, HasLoc, Loc};
 use compiler::Program;
@@ -264,7 +265,7 @@ impl<'a> Runner<'a> {
         Ok(compiler)
     }
 
-    pub fn run(&mut self, func_name: &str) -> Result<vm::Value, Error> {
+    pub fn run(&mut self, func_name: &str) -> Result<Rc<vm::Value>, Error> {
         let compiler = self.compile()?;
         let vm = vm::Vm::from_compiler(compiler);
 
@@ -310,7 +311,7 @@ impl<'a> Runner<'a> {
                     let test_name = GlobalName::named(&path, &format!("test_{name}")).to_string();
                     let func_props = vm.functions.get(&test_name).unwrap();
                     match vm.run(func_props.block_id) {
-                        Ok(result) => match result {
+                        Ok(result) => match *result {
                             vm::Value::Int(_) => todo!(),
                             vm::Value::Bool(true) => {
                                 writeln!(&mut self.output, "PASS: {name}")?;

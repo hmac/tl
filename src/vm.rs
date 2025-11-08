@@ -26,13 +26,13 @@ impl Vm {
         }
     }
 
-    pub fn run(&self, block_id: BlockId) -> Result<Value, Error> {
+    pub fn run(&self, block_id: BlockId) -> Result<Rc<Value>, Error> {
         let mut state = self.init_state(block_id);
 
         loop {
             match self.step(&mut state)? {
                 None => {}
-                Some(result) => return Ok(result),
+                Some(result) => return Ok(result.to_heap_value_rc()),
             }
         }
     }
@@ -48,7 +48,7 @@ impl Vm {
         }
     }
 
-    pub fn step<'a>(&'a self, state: &mut RunState<'a>) -> Result<Option<Value>, Error> {
+    pub fn step<'a>(&'a self, state: &mut RunState<'a>) -> Result<Option<StackValue>, Error> {
         let block_id = &mut state.block_id;
         let block = &mut state.block;
         let instruction_ptr = &mut state.instruction_ptr;
@@ -152,7 +152,7 @@ impl Vm {
                             let elems = s.chars().rev();
                             let mut list = Value::ListNil;
                             for e in elems {
-                                list = Value::ListCons(Box::new(Value::Char(e)), Box::new(list));
+                                list = Value::ListCons(StackValue::Char(e), Rc::new(list));
                             }
                             stack.push(list.to_stack_value());
                             *instruction_ptr += 1;
@@ -263,6 +263,7 @@ impl Vm {
                 let mut list = match stack.pop().expect("MakeList: empty stack") {
                     StackValue::HeapValue(v) => match &*v {
                         Value::ListCons(x, rest) => Value::ListCons(x.clone(), rest.clone()),
+                        Value::ListNil => Value::ListNil,
                         bad => unreachable!("make_list: arg is not list: {:?}", bad),
                     },
                     StackValue::ListNil => Value::ListNil,
@@ -270,7 +271,7 @@ impl Vm {
                 };
                 elems.reverse();
                 for e in elems {
-                    list = Value::ListCons(Box::new(e.to_heap_value()), Box::new(list));
+                    list = Value::ListCons(e, Rc::new(list));
                 }
                 stack.push(list.to_stack_value());
                 *instruction_ptr += 1;
@@ -278,16 +279,21 @@ impl Vm {
             Instruction::MakeTuple(len) => {
                 let mut elems = vec![];
                 for _ in 0..*len {
-                    elems.push(stack.pop().expect("MakeTuple: empty stack").to_heap_value());
+                    elems.push(
+                        stack
+                            .pop()
+                            .expect("MakeTuple: empty stack")
+                            .to_heap_value_rc(),
+                    );
                 }
                 stack.push(Value::Tuple(elems).to_stack_value());
                 *instruction_ptr += 1;
             }
             Instruction::Ctor(c, len) => {
-                let mut args: Vec<Value> = stack
+                let mut args: Vec<Rc<Value>> = stack
                     .split_off(stack.len() - *len as usize)
                     .into_iter()
-                    .map(StackValue::to_heap_value)
+                    .map(StackValue::to_heap_value_rc)
                     .collect();
                 args.reverse();
                 let val = Value::Constructor {
@@ -386,7 +392,6 @@ impl Vm {
 
                                     // Then we push the already-applied args onto the stack
                                     for arg in args.into_iter().rev() {
-                                        // TODO: remove this clone?
                                         stack.push(rc_value_to_stack_value(arg.clone()));
                                     }
 
@@ -421,8 +426,7 @@ impl Vm {
                                         new_args.push(a.clone())
                                     }
                                     for _ in 0..len {
-                                        new_args
-                                            .push(Rc::new(stack.pop().unwrap().to_heap_value()));
+                                        new_args.push(stack.pop().unwrap().to_heap_value_rc());
                                     }
                                     stack.push(StackValue::Func {
                                         props: props.clone(),
@@ -436,7 +440,7 @@ impl Vm {
                             // Push the new args onto the constructor
                             let mut new_args = args.clone();
                             for _ in 0..len {
-                                new_args.push(stack.pop().unwrap().to_heap_value());
+                                new_args.push(stack.pop().unwrap().to_heap_value_rc());
                             }
                             stack.push(
                                 Value::Constructor {
@@ -526,9 +530,7 @@ impl Vm {
                     *current_func_block_id = caller_func_block_id;
                     *instruction_ptr = caller_addr;
                 } else {
-                    // We're at the top level. Return the result.
-                    // TODO: should we be converting to a heap value here?
-                    return Ok(Some(result.to_heap_value()));
+                    return Ok(Some(result));
                 }
             }
             Instruction::Shift(n) => {
@@ -667,7 +669,7 @@ impl Vm {
                     new_args.push(a.clone())
                 }
                 for _ in 0..len {
-                    new_args.push(Rc::new(stack.pop().unwrap().to_heap_value()));
+                    new_args.push(stack.pop().unwrap().to_heap_value_rc());
                 }
                 stack.push(StackValue::Func {
                     props: props.clone(),
@@ -734,7 +736,7 @@ fn match_pattern(target: StackValue, pattern: &Pattern) -> Option<Vec<StackValue
                         for (val, pattern) in target_args.iter().zip(args) {
                             if let Some(new_bindings) = match_pattern_heap(val, pattern) {
                                 for b in new_bindings {
-                                    bindings.push(b.to_stack_value())
+                                    bindings.push(b)
                                 }
                             } else {
                                 return None;
@@ -785,12 +787,12 @@ fn match_pattern(target: StackValue, pattern: &Pattern) -> Option<Vec<StackValue
                         let mut xs: &Value = &xs_;
                         // Match x with the first pattern in `elems`
                         let p1 = &elems[0];
-                        let mut elem_matches = match_pattern_heap(&x, &p1)?;
+                        let mut elem_matches = match_pattern(x.clone(), &p1)?;
                         // Match each element in `xs` with the coresponding patterns in `elems`
                         for p in elems.iter().skip(1) {
                             match xs {
                                 Value::ListCons(y, ys) => {
-                                    elem_matches.append(&mut match_pattern_heap(&*y, &p)?);
+                                    elem_matches.append(&mut match_pattern(y.clone(), &p)?);
                                     xs = &ys;
                                 }
                                 _ => {
@@ -801,18 +803,14 @@ fn match_pattern(target: StackValue, pattern: &Pattern) -> Option<Vec<StackValue
                         // Match the remaining `xs` with `tail`, if it exists.
                         // Otherwise, match `xs` with ListNil
                         if let Some(tail) = tail {
-                            elem_matches.append(&mut match_pattern_heap(xs, &tail)?);
+                            let mut tail_match = match_pattern_heap(xs, &tail)?;
+                            elem_matches.append(&mut tail_match);
                         } else {
                             if *xs != Value::ListNil {
                                 return None;
                             }
                         }
-                        Some(
-                            elem_matches
-                                .into_iter()
-                                .map(Value::to_stack_value)
-                                .collect(),
-                        )
+                        Some(elem_matches)
                     }
                 }
                 _ => None,
@@ -826,7 +824,7 @@ fn match_pattern(target: StackValue, pattern: &Pattern) -> Option<Vec<StackValue
                     let mut matches = vec![];
                     for (p, x) in elems.iter().zip(xs.iter()) {
                         for submatch in match_pattern_heap(x, p)? {
-                            matches.push(submatch.to_stack_value());
+                            matches.push(submatch);
                         }
                     }
                     Some(matches)
@@ -839,7 +837,7 @@ fn match_pattern(target: StackValue, pattern: &Pattern) -> Option<Vec<StackValue
 }
 
 // TODO: avoid cloning here
-fn match_pattern_heap(target: &Value, pattern: &Pattern) -> Option<Vec<Value>> {
+fn match_pattern_heap(target: &Value, pattern: &Pattern) -> Option<Vec<StackValue>> {
     match pattern {
         Pattern::Constructor { name, args, .. } => match target {
             Value::Bool(true) => {
@@ -877,7 +875,8 @@ fn match_pattern_heap(target: &Value, pattern: &Pattern) -> Option<Vec<Value>> {
             }
             _ => unreachable!("pattern={pattern:?} target={target:?}"),
         },
-        Pattern::Var { .. } => Some(vec![target.clone()]),
+        // TODO: remove this clone
+        Pattern::Var { .. } => Some(vec![StackValue::HeapValue(Rc::new(target.clone()))]),
         Pattern::Int { value, .. } => match target {
             Value::Int(n) if n == value => Some(vec![]),
             _ => None,
@@ -898,12 +897,12 @@ fn match_pattern_heap(target: &Value, pattern: &Pattern) -> Option<Vec<Value>> {
                     let mut xs: &Value = &xs_;
                     // Match x with the first pattern in `elems`
                     let p1 = &elems[0];
-                    let mut elem_matches = match_pattern_heap(x, &p1)?;
+                    let mut elem_matches = match_pattern(x.clone(), &p1)?;
                     // Match each element in `xs` with the coresponding patterns in `elems`
                     for p in elems.iter().skip(1) {
                         match xs {
                             Value::ListCons(y, ys) => {
-                                elem_matches.append(&mut match_pattern_heap(&*y, &p)?);
+                                elem_matches.append(&mut match_pattern(y.clone(), &p)?);
                                 xs = &ys;
                             }
                             _ => {
@@ -914,7 +913,8 @@ fn match_pattern_heap(target: &Value, pattern: &Pattern) -> Option<Vec<Value>> {
                     // Match the remaining `xs` with `tail`, if it exists.
                     // Otherwise, match `xs` with ListNil
                     if let Some(tail) = tail {
-                        elem_matches.append(&mut match_pattern_heap(xs, &tail)?);
+                        let mut tail_match = match_pattern_heap(xs, &tail)?;
+                        elem_matches.append(&mut tail_match);
                     } else {
                         if *xs != Value::ListNil {
                             return None;
@@ -960,19 +960,14 @@ pub enum StackValue {
 }
 
 impl StackValue {
-    pub fn to_heap_value(self) -> Value {
+    pub fn to_heap_value_rc(self) -> Rc<Value> {
         match self {
-            Self::Int(n) => Value::Int(n),
-            Self::Char(c) => Value::Char(c),
-            Self::Bool(b) => Value::Bool(b),
-            Self::ListNil => Value::ListNil,
-            Self::Func { props, args } => Value::Func { props, args },
-            Self::HeapValue(v) => {
-                // Note: for simplicity at the moment, we do not store Rc refs to heap values
-                // inside other heap values. We instead copy them. We can change this, but
-                // I'd like to get basic Rc working first.
-                (*v).clone()
-            }
+            Self::Int(n) => Rc::new(Value::Int(n)),
+            Self::Char(c) => Rc::new(Value::Char(c)),
+            Self::Bool(b) => Rc::new(Value::Bool(b)),
+            Self::ListNil => Rc::new(Value::ListNil),
+            Self::Func { props, args } => Rc::new(Value::Func { props, args }),
+            Self::HeapValue(v) => v.clone(),
         }
     }
 
@@ -1083,8 +1078,8 @@ pub enum Value {
     Str(String),
     Char(char),
     Bool(bool),
-    Tuple(Vec<Value>),
-    ListCons(Box<Value>, Box<Value>),
+    Tuple(Vec<Rc<Value>>),
+    ListCons(StackValue, Rc<Value>),
     ListNil,
     Func {
         props: Rc<FuncProperties>,
@@ -1097,7 +1092,7 @@ pub enum Value {
     },
     Constructor {
         name: String,
-        args: Vec<Value>,
+        args: Vec<Rc<Value>>,
     },
 }
 
@@ -1254,7 +1249,7 @@ fn display_constructor_arg(
 
 fn display_nonempty_list<'a>(
     f: &mut std::fmt::Formatter<'_>,
-    mut head: &'a Value,
+    mut head: &'a StackValue,
     mut tail: &'a Value,
 ) -> Result<(), std::fmt::Error> {
     write!(f, "[")?;
