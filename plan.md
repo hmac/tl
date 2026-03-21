@@ -1,71 +1,36 @@
-# Plan: Add no-target-case form
+# Plan: Add no-target-case form (lambda-case)
 
 ## What it is
 
-A `case` expression with no target, acting as a `cond` / multi-way conditional:
+A `case` expression with no target — same patterns, same branches, but it produces a **function** that takes one argument and matches on it. Like Haskell's `\case`.
 
 ```tl
-case {
-  gt x 0 -> "positive",
-  eq x 0 -> "zero",
-  _ -> "negative"
-}
+// before
+f : Option Int -> Int { x -> case x { Some n -> n, None -> 0 } }
+
+// after
+f : Option Int -> Int { case { Some n -> n, None -> 0 } }
 ```
 
-Each branch LHS is a boolean expression (not a pattern). The first branch whose LHS evaluates to `True` is taken. A `_` wildcard branch always matches (acts as `else`).
+The branches use the exact same patterns as regular `case`. The only difference is the absence of a target expression.
 
 ## Desugaring strategy
 
-Desugar in the parser (or just after parsing) into:
+Desugar in the parser to a `Func` wrapping a `Case`:
 
-```tl
-case True {
-  _ if e1 -> r1,
-  _ if e2 -> r2,
-  ...
-}
+```
+case { Pat1 -> e1, Pat2 -> e2 }
+```
+becomes:
+```
+\__arg -> case __arg { Pat1 -> e1, Pat2 -> e2 }
 ```
 
-Actually, the simplest approach: **desugar directly to nested case-on-Bool**:
-
-```tl
-case e1 {
-  True -> r1,
-  False -> case e2 {
-    True -> r2,
-    False -> case e3 {
-      True -> r3,
-      False -> ...
-    }
-  }
-}
-```
-
-This requires zero changes to the typechecker, compiler, or VM. The wildcard `_` branch is the final `False -> rhs` with no further nesting.
+This requires zero changes to the typechecker, compiler, or VM. The no-target form never appears in the AST — it's pure syntactic sugar for a lambda + case.
 
 ## Changes by file
 
-### 1. `src/ast.rs`
-- Make `target` in `Expr::Case` an `Option<Box<Expr>>`:
-  ```rust
-  Case {
-      loc: Loc,
-      target: Option<Box<Expr>>,
-      branches: Vec<CaseBranch>,
-  }
-  ```
-- Add a new `CaseCondBranch` struct for the no-target form (before desugaring):
-  ```rust
-  pub struct CaseCondBranch {
-      pub loc: Loc,
-      pub condition: CaseCondition, // Expr or Wildcard
-      pub rhs: Expr,
-  }
-  ```
-
-  Actually, **simpler**: don't change the AST at all. Desugar in the parser directly to nested `Expr::Case` with `target: Box<Expr>`. The no-target form never appears in the AST — it's pure syntactic sugar.
-
-### 2. `src/parser.rs` — `parse_case()`
+### 1. `src/parser.rs` — `parse_case()`
 
 Current flow:
 1. `eat("case")`
@@ -76,25 +41,16 @@ Current flow:
 
 New flow:
 1. `eat("case")`
-2. peek next char — if `{`, this is a no-target case
+2. `trim()`, peek next char — if `{`, this is a no-target case
 3. If no-target:
    - `eat("{")`
-   - Parse cond branches: each is `expr -> expr` or `_ -> expr`
+   - Parse branches with `parse_match_branch()` (same as regular case)
    - `eat("}")`
-   - Desugar into nested `Expr::Case` on Bool
-4. If target present: existing behavior
+   - Generate a fresh variable name (e.g. `__case_arg`)
+   - Return `Expr::Func { args: [__case_arg], body: Expr::Case { target: __case_arg, branches } }`
+4. If target present: existing behavior (unchanged)
 
-New helper: `parse_cond_branch()`:
-- If `_`, parse `_ -> expr` (the else branch)
-- Otherwise, parse `expr -> expr`
-
-Desugaring function: `desugar_cond_branches(loc, branches) -> Expr`:
-- Takes `Vec<(Option<Expr>, Expr)>` where `None` condition = wildcard
-- Builds nested `case condition { True -> rhs, False -> <recurse> }`
-- The wildcard/last branch becomes the innermost `False ->` RHS
-- If no wildcard: error (non-exhaustive)
-
-### 3. `tree-sitter-tl/grammar.js`
+### 2. `tree-sitter-tl/grammar.js`
 
 Update the `case` rule to allow optional target:
 ```js
@@ -107,33 +63,28 @@ case: $ => seq(
 ),
 ```
 
-Or add a separate `cond` rule. The branch rule also changes since LHS can be an expression or `_` instead of just a pattern.
+### 3. No changes needed
+- **`src/ast.rs`** — no structural changes; desugared form uses existing `Func` + `Case`
+- **`src/compiler.rs`** — only sees a normal `Func` containing a `Case`
+- **`src/vm.rs`** — only sees normal instructions
+- **`src/typechecker.rs`** — infers the `Func` type as `a -> b` where `a` is the pattern type and `b` is the branch result type
 
-### 4. No changes needed
-- **`src/compiler.rs`** — only sees desugared nested `Case` with targets
-- **`src/vm.rs`** — only sees normal `Case` instructions
-- **`src/typechecker.rs`** — only sees nested `Case { target: Bool, branches: [True -> ..., False -> ...] }`
-- **`src/ast.rs`** — no structural changes needed
-
-### 5. Tests
+### 4. Tests
 
 Add fixtures:
-- `fixtures/tests/cond.tl` — basic no-target case
-- `fixtures/tests/cond_nested.tl` — nested no-target case
-- `fixtures/type_errors/cond_non_bool.tl` — LHS that isn't Bool should error
-- `fixtures/type_errors/cond_non_exhaustive.tl` — missing wildcard/else
+- `fixtures/tests/lambda_case.tl` — basic no-target case used as a function body
+- `fixtures/tests/lambda_case_applied.tl` — no-target case applied inline, e.g. `(case { Some n -> n, None -> 0 }) (Some 5)`
 
-### 6. Edge cases to handle
+### 5. Edge cases
 
-- Empty `case {}` — error (already handled by `EmptyMatch`)
-- All branches are wildcards `case { _ -> 1, _ -> 2 }` — first one wins, but second is dead code
-- Wildcard not in last position — could warn or error
-- Single branch `case { e -> r }` — non-exhaustive without wildcard (what if `e` is False?)
+- Empty `case {}` — produces a function that always fails to match (existing `EmptyMatch` error at typecheck time)
+- `case { ... }` used in a position where a function is expected — works naturally since it desugars to a `Func`
+- Free variable name collision — use a name like `__case_arg` that users can't normally write (or a guaranteed-fresh gensym)
 
 ## Implementation order
 
-1. Parser: detect no-target form and parse cond branches
-2. Parser: desugar cond branches to nested Case expressions
-3. Tree-sitter grammar: update for syntax highlighting
+1. Parser: detect no-target form (peek for `{` after `case`)
+2. Parser: parse branches normally, wrap in `Func` + `Case`
+3. Tree-sitter grammar: make target optional
 4. Add test fixtures
 5. Run existing tests to verify nothing breaks
