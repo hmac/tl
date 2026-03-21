@@ -9,7 +9,7 @@ triple : (Int, Bool, Char) { (1, True, 'a') }
 quad : (Int, Bool, Char, String) { (1, True, 'a', "hi") }
 
 nested : (Int, (Bool, ((Char,), Bool))) -> Char {
-  p -> case p {
+  case {
     (i, (b, ((c,), b2))) -> c
   }
 }

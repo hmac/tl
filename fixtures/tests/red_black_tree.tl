@@ -26,7 +26,7 @@ type Tree k v {
 make_tree : Tree k v { Leaf }
 
 is_red : Tree k v -> Bool {
-  t -> case t { Node Red _ _ _ _ -> True, _ -> False }
+  case { Node Red _ _ _ _ -> True, _ -> False }
 }
 
 bal_left : Tree k v -> k -> v -> Tree k v -> Tree k v {
@@ -41,7 +41,7 @@ bal_left : Tree k v -> k -> v -> Tree k v -> Tree k v {
 }
 
 bal_right : Tree k v -> k -> v -> Tree k v -> Tree k v {
-  l k v r -> case r {
+  l k v -> case {
     Leaf -> Leaf,
     Node _ (Node Red lx kx vx rx) ky vy ry ->
       Node Red (Node Black l k v lx) kx vx (Node Black rx ky vy ry),
@@ -88,7 +88,7 @@ insert : (k -> k -> Ordering) -> k -> v -> Tree k v -> Tree k v {
 type Option a { None, Some a }
 
 lookup : (k -> k -> Ordering) -> k -> Tree k v -> Option v {
-  cmp k t -> case t {
+  cmp k -> case {
     Leaf -> None,
     Node _ l kx vx r -> case cmp k kx {
       Lt -> lookup cmp k l,
@@ -115,14 +115,14 @@ test lookup_2 {
 }
 
 size : Tree k v -> Int {
-  t -> case t {
+  case {
     Leaf -> 0,
     Node _ l _ _ r -> + (+ (size l) (size r)) 1
   }
 }
 
 to_list : Tree k v -> List (k, v,) {
-  t -> case t {
+  case {
     Leaf -> [],
     Node _ l k v r ->
       let list_l = to_list l,

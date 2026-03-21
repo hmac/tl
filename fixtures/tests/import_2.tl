@@ -1,11 +1,11 @@
 use ./import_1.tl as imp
 
 baz : Bool -> imp.MyType {
-  b -> case b { True -> imp.Foo, False -> imp.NoFoo }
+  case { True -> imp.Foo, False -> imp.NoFoo }
 }
 
 isFoo : imp.MyType -> Bool {
-  t -> case t {
+  case {
     imp.Foo -> True,
     _ -> False
   }

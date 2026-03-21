@@ -9,25 +9,25 @@ new : (k -> k -> tree.Ordering) -> Map k v {
 }
 
 insert : k -> v -> Map k v -> Map k v {
-  k v m -> case m {
+  k v -> case {
     Map ord t -> Map ord (tree.insert ord k v t)
   }
 }
 
 lookup : k -> Map k v -> tree.Option v {
-  k m -> case m {
+  k -> case {
     Map ord t -> tree.lookup ord k t
   }
 }
 
 size : Map k v -> Int {
-  m -> case m {
+  case {
     Map _ t -> tree.size t
   }
 }
 
 to_list : Map k v -> List (k, v,) {
-  m -> case m {
+  case {
     Map _ t -> tree.to_list t
   }
 }

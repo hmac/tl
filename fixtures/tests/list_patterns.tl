@@ -1,5 +1,5 @@
 f : List Int -> Int {
-  x -> case x {
+  case {
     [1, ..[2]] -> 0,
   }
 }
