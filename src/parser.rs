@@ -1,6 +1,6 @@
 use crate::ast::{
-    CaseBranch, Decl, Expr, HasLoc, LetBinding, Loc, Namespace, Operator, Pattern, SourceType,
-    TypeConstructor, Var, CASE_LAMBDA_ARG,
+    CaseBranch, Decl, Expr, FuncArg, HasLoc, LetBinding, Loc, Namespace, Operator, Pattern,
+    SourceType, TypeConstructor, Var,
 };
 use std::{collections::VecDeque, path::PathBuf};
 
@@ -546,7 +546,7 @@ impl Parser {
                         for e in exprs {
                             match e {
                                 Expr::Var(loc, Var::Local(n)) => {
-                                    args.push((loc, n));
+                                    args.push((loc, FuncArg::Named(n)));
                                 }
                                 _ => {
                                     return Err(Error::ExpectedPattern((loc, self.loc)));
@@ -897,7 +897,7 @@ impl Parser {
         if lambda_case {
             Ok(Expr::Func {
                 loc: (loc, self.loc),
-                args: vec![((loc, loc), CASE_LAMBDA_ARG.to_string())],
+                args: vec![((loc, loc), FuncArg::CaseLambdaArg)],
                 body: Box::new(case_expr),
             })
         } else {

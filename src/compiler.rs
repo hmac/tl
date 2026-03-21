@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path};
 use tracing::debug;
 
 use crate::{
-    ast::{Expr, GlobalName, Loc, Operator, Pattern, Var, CASE_LAMBDA_ARG},
+    ast::{Expr, FuncArg, GlobalName, Loc, Operator, Pattern, Var},
     typechecker::Imports,
 };
 
@@ -51,10 +51,10 @@ impl Compiler {
             Expr::Func { args, body, .. } => {
                 let mut locals = Vec::new();
                 for (_, a) in args.iter().rev() {
-                    locals.push(a.to_string());
+                    locals.push(a.local_key().to_string());
                 }
                 let ins = self.compile_expr(path, name, body, locals, true)?;
-                (ins, args.iter().map(|(_, n)| n.to_string()).collect())
+                (ins, args.iter().map(|(_, a)| a.local_key().to_string()).collect())
             }
             e => (self.compile_expr(path, name, e, Vec::new(), true)?, vec![]),
         };
@@ -99,7 +99,8 @@ impl Compiler {
                 }
             }
             Expr::Var(_, Var::CaseLambdaArg) => {
-                let index = locals.iter().position(|x| x == CASE_LAMBDA_ARG)
+                let key = Var::CaseLambdaArg.local_key().unwrap();
+                let index = locals.iter().position(|x| x == key)
                     .expect("CaseLambdaArg must be bound in enclosing Func");
                 ins.push(Instruction::PushVar(index));
             }
@@ -403,7 +404,7 @@ impl Compiler {
         &mut self,
         path: &Path,
         locals: &Vec<String>,
-        args: &[(Loc, String)],
+        args: &[(Loc, FuncArg)],
         body: &Expr,
     ) -> Result<String, Error> {
         // The lifted function takes all its original arguments, plus any (captured?)
@@ -412,8 +413,8 @@ impl Compiler {
         // so the body's locals are [argN, argN-1, ... arg1, capturedN, capturedN-1, ..., captured1]
         let mut body_locals = locals.clone();
         body_locals.reverse();
-        for (_, v) in args {
-            body_locals.push(v.to_string())
+        for (_, a) in args {
+            body_locals.push(a.local_key().to_string())
         }
         let local_name = self.generate_fresh_name();
         let name = GlobalName::named(path, &local_name).to_string();
@@ -448,7 +449,7 @@ impl Compiler {
             "+",
             &Expr::Func {
                 loc: (0, 0),
-                args: vec![((0, 0), "x".to_string()), ((0, 0), "y".to_string())],
+                args: vec![((0, 0), FuncArg::Named("x".to_string())), ((0, 0), FuncArg::Named("y".to_string()))],
                 body: Box::new(Expr::App {
                     loc: (0, 0),
                     head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Add))),
@@ -465,7 +466,7 @@ impl Compiler {
             "-",
             &Expr::Func {
                 loc: (0, 0),
-                args: vec![((0, 0), "x".to_string()), ((0, 0), "y".to_string())],
+                args: vec![((0, 0), FuncArg::Named("x".to_string())), ((0, 0), FuncArg::Named("y".to_string()))],
                 body: Box::new(Expr::App {
                     loc: (0, 0),
                     head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Sub))),
@@ -482,7 +483,7 @@ impl Compiler {
             "*",
             &Expr::Func {
                 loc: (0, 0),
-                args: vec![((0, 0), "x".to_string()), ((0, 0), "y".to_string())],
+                args: vec![((0, 0), FuncArg::Named("x".to_string())), ((0, 0), FuncArg::Named("y".to_string()))],
                 body: Box::new(Expr::App {
                     loc: (0, 0),
                     head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Mul))),
@@ -499,7 +500,7 @@ impl Compiler {
             "<",
             &Expr::Func {
                 loc: (0, 0),
-                args: vec![((0, 0), "x".to_string()), ((0, 0), "y".to_string())],
+                args: vec![((0, 0), FuncArg::Named("x".to_string())), ((0, 0), FuncArg::Named("y".to_string()))],
                 body: Box::new(Expr::App {
                     loc: (0, 0),
                     head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Lt))),
@@ -516,7 +517,7 @@ impl Compiler {
             "==",
             &Expr::Func {
                 loc: (0, 0),
-                args: vec![((0, 0), "x".to_string()), ((0, 0), "y".to_string())],
+                args: vec![((0, 0), FuncArg::Named("x".to_string())), ((0, 0), FuncArg::Named("y".to_string()))],
                 body: Box::new(Expr::App {
                     loc: (0, 0),
                     head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Eq))),
@@ -533,7 +534,7 @@ impl Compiler {
             "chars",
             &Expr::Func {
                 loc: (0, 0),
-                args: vec![((0, 0), "s".to_string())],
+                args: vec![((0, 0), FuncArg::Named("s".to_string()))],
                 body: Box::new(Expr::App {
                     loc: (0, 0),
                     head: Box::new(Expr::Var((0, 0), Var::Operator(Operator::Chars))),

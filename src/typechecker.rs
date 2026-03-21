@@ -632,7 +632,7 @@ impl Typechecker {
 
                 // Add each arg to local variables
                 for (_, arg) in args {
-                    new_locals.insert(arg.clone(), func_arg_types.next().unwrap().clone());
+                    new_locals.insert(arg.local_key().to_string(), func_arg_types.next().unwrap().clone());
                 }
 
                 // TODO: if there are more expr args than type args,
@@ -1317,7 +1317,10 @@ impl Typechecker {
     ) -> Result<Type, Error> {
         match var {
             Var::Local(s) => self.lookup_local(local_variables, type_variables, path, s, loc),
-            Var::CaseLambdaArg => self.lookup_local(local_variables, type_variables, path, CASE_LAMBDA_ARG, loc),
+            Var::CaseLambdaArg => {
+                let key = var.local_key().unwrap();
+                self.lookup_local(local_variables, type_variables, path, key, loc)
+            }
             Var::Global(ns, s) => {
                 let name = self.imports.lookup(loc, path, ns, s)?;
                 self.lookup_global(type_variables, &name, loc)

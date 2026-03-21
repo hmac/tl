@@ -475,7 +475,7 @@ pub enum Expr {
     },
     Func {
         loc: Loc,
-        args: Vec<(Loc, String)>,
+        args: Vec<(Loc, FuncArg)>,
         body: Box<Expr>,
     },
     App {
@@ -519,10 +519,8 @@ impl Expr {
             }
             Expr::Func { args, body, .. } => {
                 let mut vars = HashSet::new();
-                for v in body
-                    .free_variables()
-                    .difference(&args.iter().map(|a| &a.1).collect())
-                {
+                let arg_names: HashSet<&String> = args.iter().filter_map(|(_, a)| a.name()).collect();
+                for v in body.free_variables().difference(&arg_names) {
                     vars.insert(*v);
                 }
                 vars
@@ -772,9 +770,6 @@ impl std::fmt::Display for Namespace {
     }
 }
 
-/// Internal name used to bind the implicit argument of a lambda-case in Func args.
-pub const CASE_LAMBDA_ARG: &str = "\0case_lambda_arg";
-
 #[derive(Debug, Clone)]
 pub enum Var {
     Local(String),
@@ -784,6 +779,46 @@ pub enum Var {
     /// The implicit argument of a lambda-case expression (`case { ... }`).
     /// Bound exactly once in the enclosing Func and used exactly once as the Case target.
     CaseLambdaArg,
+}
+
+/// An argument in a Func expression.
+#[derive(Debug, Clone)]
+pub enum FuncArg {
+    Named(String),
+    /// The implicit argument of a lambda-case expression.
+    CaseLambdaArg,
+}
+
+/// Internal key used for CaseLambdaArg in local variable maps.
+/// Contains a null byte so it cannot be written in source code.
+const CASE_LAMBDA_KEY: &str = "\0case_lambda";
+
+impl FuncArg {
+    pub fn name(&self) -> Option<&String> {
+        match self {
+            FuncArg::Named(s) => Some(s),
+            FuncArg::CaseLambdaArg => None,
+        }
+    }
+
+    /// Returns the key used to identify this arg in local variable maps.
+    pub fn local_key(&self) -> &str {
+        match self {
+            FuncArg::Named(s) => s,
+            FuncArg::CaseLambdaArg => CASE_LAMBDA_KEY,
+        }
+    }
+}
+
+impl Var {
+    /// For variants that refer to a local binding, returns the local variable key.
+    pub fn local_key(&self) -> Option<&str> {
+        match self {
+            Var::Local(s) => Some(s),
+            Var::CaseLambdaArg => Some(CASE_LAMBDA_KEY),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
