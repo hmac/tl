@@ -772,12 +772,18 @@ impl std::fmt::Display for Namespace {
     }
 }
 
+/// Internal name used to bind the implicit argument of a lambda-case in Func args.
+pub const CASE_LAMBDA_ARG: &str = "\0case_lambda_arg";
+
 #[derive(Debug, Clone)]
 pub enum Var {
     Local(String),
     Global(Option<Namespace>, String),
     Constructor(Option<Namespace>, String),
     Operator(Operator),
+    /// The implicit argument of a lambda-case expression (`case { ... }`).
+    /// Bound exactly once in the enclosing Func and used exactly once as the Case target.
+    CaseLambdaArg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

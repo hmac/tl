@@ -1,6 +1,6 @@
 use crate::ast::{
     CaseBranch, Decl, Expr, HasLoc, LetBinding, Loc, Namespace, Operator, Pattern, SourceType,
-    TypeConstructor, Var,
+    TypeConstructor, Var, CASE_LAMBDA_ARG,
 };
 use std::{collections::VecDeque, path::PathBuf};
 
@@ -869,7 +869,7 @@ impl Parser {
         // Desugar `case { P -> E, ... }` into `_case_arg -> case _case_arg { P -> E, ... }`
         let lambda_case = self.input().starts_with('{');
         let target = if lambda_case {
-            Expr::Var((loc, loc), Var::Local("_case_arg".to_string()))
+            Expr::Var((loc, loc), Var::CaseLambdaArg)
         } else {
             self.parse_expr()?
         };
@@ -897,7 +897,7 @@ impl Parser {
         if lambda_case {
             Ok(Expr::Func {
                 loc: (loc, self.loc),
-                args: vec![((loc, loc), "_case_arg".to_string())],
+                args: vec![((loc, loc), CASE_LAMBDA_ARG.to_string())],
                 body: Box::new(case_expr),
             })
         } else {
