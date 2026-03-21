@@ -152,9 +152,9 @@ Expr::Char(_, _) => Ok(TYPE_STRING),  // Bug: should be TYPE_CHAR
 
 Everything defined in a module is automatically exported. There's no `pub`/`private` distinction. As programs grow, this leads to namespace pollution and makes it hard to maintain internal invariants (e.g., the red-black tree's balancing functions shouldn't be part of its public API).
 
-### 8. Constructor Names Must Be Globally Unique
+### 8. Constructor Uniqueness Error Message is Misleading
 
-From the error message: *"constructor names must be globally unique"*. This is a significant restriction. You can't define `None` in two different files, even if they define different types. This will cause problems as programs grow. Most languages scope constructors to their type or module.
+The `DuplicateConstructor` error says *"constructor names must be globally unique"*, but constructors are actually keyed by `GlobalName::named(path, name)`, which includes the file path. So defining `None` in two different files is fine -- the constraint is per-file uniqueness. The error message should be updated to say something like *"this constructor conflicts with another constructor in the same file"*.
 
 ### 9. Tuple Syntax Has a Trailing Comma Requirement
 
@@ -202,7 +202,7 @@ The main areas for improvement are:
 2. **Fix the `Char` inference bug** (returns `Str` instead of `Char`)
 3. **Add recursive `let` bindings** (major ergonomic win)
 4. **Consider `if/then/else` sugar** (readability improvement for boolean branching)
-5. **Relax the global constructor uniqueness constraint** (will be necessary for larger programs)
+5. **Fix the misleading constructor uniqueness error message** (it says "globally unique" but the actual constraint is per-file)
 6. **Use free variable analysis in lambda lifting** (the code for it already exists)
 
 The language is at a good point where these incremental improvements would significantly expand what users can practically build with it.
