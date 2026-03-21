@@ -131,12 +131,42 @@ These test the subtract algorithm directly, without parsing or typechecking:
 
 ### Property tests (using `proptest` or `quickcheck`)
 
-If desired, we can add property tests:
+**Key property — removal breaks exhaustiveness**:
+1. Generate a random type environment (a set of types with constructors, possibly nested)
+2. Generate a set of `AbstractPattern`s that is known to be exhaustive for some type in that environment (e.g. by enumerating all leaf patterns up to some depth)
+3. Remove one randomly chosen branch
+4. Assert that `check_exhaustiveness` returns a non-empty uncovered set
 
-- **Soundness**: For any set of patterns that `check_exhaustiveness` reports as exhaustive, randomly generated values of the type should always match at least one pattern
-- **Monotonicity**: Adding a branch pattern never increases the uncovered set
+This is the most valuable property test because it:
+- Naturally produces interesting nested patterns without hand-crafting
+- Directly tests the core invariant: the algorithm must notice when coverage is incomplete
+- The generation strategy is straightforward: expand all constructors recursively to a bounded depth, producing a complete pattern set, then delete one
 
-These are valuable but optional — the unit tests above cover the important cases.
+**Generation sketch**:
+```rust
+fn generate_exhaustive_patterns(type_info: &TypeEnv, ty: TypeId, depth: usize) -> Vec<AbstractPattern> {
+    if depth == 0 {
+        return vec![Wildcard];
+    }
+    let ctors = type_info.constructors_of(ty);
+    ctors.flat_map(|(name, arg_types)| {
+        // For each constructor, recursively generate exhaustive patterns for its args
+        // and take the cartesian product
+        let arg_pattern_sets: Vec<Vec<AbstractPattern>> = arg_types
+            .iter()
+            .map(|t| generate_exhaustive_patterns(type_info, t, depth - 1))
+            .collect();
+        cartesian_product(arg_pattern_sets)
+            .map(|args| Constructor { name, args })
+    }).collect()
+}
+```
+
+Then pick a random index, remove it, and assert the checker catches it.
+
+**Additional properties** (lower priority):
+- **Soundness**: A full exhaustive set reports no uncovered patterns
+- **Monotonicity**: Adding a branch pattern never increases the uncovered set size
 
 ### Integration tests (fixture-based)
 
