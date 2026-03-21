@@ -1,5 +1,6 @@
 pub mod ast;
 mod compiler;
+pub mod exhaustiveness;
 mod local_variables;
 pub mod parser;
 mod stack;
