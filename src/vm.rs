@@ -399,7 +399,8 @@ impl Vm {
                                 }
 
                                 // Then we push the additional args supplied in this call
-                                for arg in extra_args {
+                                // (in reverse, to restore their original stack order)
+                                for arg in extra_args.into_iter().rev() {
                                     stack.push(arg);
                                 }
 
@@ -639,7 +640,8 @@ impl Vm {
             }
 
             // Then we push the additional args supplied in this call
-            for arg in extra_args {
+            // (in reverse, to restore their original stack order)
+            for arg in extra_args.into_iter().rev() {
                 stack.push(arg);
             }
 

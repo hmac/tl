@@ -8,7 +8,7 @@ make_tree : BinaryTree a {
 }
 
 contains : (a -> a -> Ordering) -> a -> BinaryTree a -> Bool {
-  cmp y t -> case t {
+  cmp y -> case {
     Leaf -> False,
     Branch left x right -> case cmp y x {
       Lt -> contains cmp y left,
@@ -19,7 +19,7 @@ contains : (a -> a -> Ordering) -> a -> BinaryTree a -> Bool {
 }
 
 insert : (a -> a -> Ordering) -> a -> BinaryTree a -> BinaryTree a {
-  cmp x t -> case t {
+  cmp x -> case {
     Leaf -> Branch Leaf x Leaf,
     Branch l y r -> case cmp x y {
       Lt -> Branch (insert cmp x l) y r,
@@ -30,7 +30,7 @@ insert : (a -> a -> Ordering) -> a -> BinaryTree a -> BinaryTree a {
 }
 
 remove : (a -> a -> Ordering) -> a -> BinaryTree a -> BinaryTree a {
-  cmp x t -> case t {
+  cmp x -> case {
     Leaf -> Leaf,
     Branch l y r -> case cmp x y {
       Lt -> Branch (remove cmp x l) y r,
@@ -69,28 +69,28 @@ merge : (a -> a -> Ordering) -> BinaryTree a -> BinaryTree a -> BinaryTree a {
 }
 
 insert_last_unchecked : a -> BinaryTree a -> BinaryTree a {
-  x t -> case t {
+  x -> case {
     Leaf -> Branch Leaf x Leaf,
     Branch l y r -> Branch l y (insert_last_unchecked x r)
   }
 }
 
 to_list : BinaryTree a -> List a {
-  t -> case t {
+  case {
     Leaf -> [],
     Branch l x r -> append (to_list l) [x, ..to_list r]
   }
 }
 
 from_list : (a -> a -> Ordering) -> List a -> BinaryTree a {
-  cmp l -> case l {
+  cmp -> case {
     [] -> make_tree,
     [x, ..xs] -> insert cmp x (from_list cmp xs)
   }
 }
 
 from_ordered_list : List a -> BinaryTree a {
-  l -> case l {
+  case {
     [] -> make_tree,
     [x, ..xs] -> insert_last_unchecked x (from_ordered_list xs)
   }
@@ -158,7 +158,7 @@ test from_list_to_list_roundtrip {
 }
 
 size : BinaryTree a -> Int {
-  t -> case t {
+  case {
     Leaf -> 0,
     Branch l x r -> + (+ (size l) (size r)) 1
   }
@@ -169,7 +169,7 @@ test size_2 { == 0 (size make_tree)  }
 test size_3 { == 3 (size (from_list cmp_int [1,2,2,2,2,6])) }
 
 depth : BinaryTree a -> Int {
-  t -> case t {
+  case {
     Leaf -> 0,
     Branch l x r -> + 1 (max2 (depth l) (depth r))
   }
