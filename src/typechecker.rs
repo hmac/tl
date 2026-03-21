@@ -1317,7 +1317,6 @@ impl Typechecker {
     ) -> Result<Type, Error> {
         match var {
             Var::Local(s) => self.lookup_local(local_variables, type_variables, path, s, loc),
-            Var::CaseLambdaArg => self.lookup_local(local_variables, type_variables, path, CASE_LAMBDA_ARG, loc),
             Var::Global(ns, s) => {
                 let name = self.imports.lookup(loc, path, ns, s)?;
                 self.lookup_global(type_variables, &name, loc)

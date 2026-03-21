@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path};
 use tracing::debug;
 
 use crate::{
-    ast::{Expr, GlobalName, Loc, Operator, Pattern, Var, CASE_LAMBDA_ARG},
+    ast::{Expr, GlobalName, Loc, Operator, Pattern, Var},
     typechecker::Imports,
 };
 
@@ -97,11 +97,6 @@ impl Compiler {
                         ins.push(Instruction::Call);
                     }
                 }
-            }
-            Expr::Var(_, Var::CaseLambdaArg) => {
-                let index = locals.iter().position(|x| x == CASE_LAMBDA_ARG)
-                    .expect("CaseLambdaArg must be bound in enclosing Func");
-                ins.push(Instruction::PushVar(index));
             }
             Expr::Var(loc, Var::Global(namespace, name)) => {
                 // Look up the global's name
