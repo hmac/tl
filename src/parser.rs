@@ -865,7 +865,14 @@ impl Parser {
         let loc = self.loc;
         self.eat("case")?;
         self.trim();
-        let target = self.parse_expr()?;
+        // If the next token is '{', this is a lambda-case (no target).
+        // Desugar `case { P -> E, ... }` into `_case_arg -> case _case_arg { P -> E, ... }`
+        let lambda_case = self.input().starts_with('{');
+        let target = if lambda_case {
+            Expr::Var((loc, loc), Var::Local("_case_arg".to_string()))
+        } else {
+            self.parse_expr()?
+        };
         self.trim();
         self.eat("{")?;
         self.trim();
@@ -882,11 +889,20 @@ impl Parser {
         }
         self.eat("}")?;
         self.trim();
-        Ok(Expr::Case {
+        let case_expr = Expr::Case {
             loc: (loc, self.loc),
             target: Box::new(target),
             branches,
-        })
+        };
+        if lambda_case {
+            Ok(Expr::Func {
+                loc: (loc, self.loc),
+                args: vec![((loc, loc), "_case_arg".to_string())],
+                body: Box::new(case_expr),
+            })
+        } else {
+            Ok(case_expr)
+        }
     }
 
     fn parse_match_branch(&mut self) -> Result<CaseBranch, Error> {
