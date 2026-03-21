@@ -70,3 +70,41 @@ contains : Int -> List Int -> Bool {
 
 test contains_found { contains 2 [1, 2, 3] }
 test contains_missing { == False (contains 4 [1, 2, 3]) }
+
+// lambda-case passed directly as an argument to a higher-order function
+map : (a -> b) -> List a -> List b {
+  f l -> case l {
+    [] -> [],
+    [x, ..xs] -> [f x, ..map f xs]
+  }
+}
+
+test map_lambda_case {
+  == [2, 3, 4] (map (case { x -> + x 1 }) [1, 2, 3])
+}
+
+test map_option_lambda_case {
+  == (Some 6) (map_option (case { x -> + x 1 }) (Some 5))
+}
+
+// lambda-case with Bool patterns
+negate : Bool -> Bool {
+  case {
+    True -> False,
+    False -> True
+  }
+}
+
+test negate_true { == False (negate True) }
+test negate_false { negate False }
+
+// lambda-case with int literal patterns
+describe : Int -> Bool {
+  case {
+    0 -> False,
+    _ -> True
+  }
+}
+
+test describe_zero { == False (describe 0) }
+test describe_nonzero { describe 42 }
