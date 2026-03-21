@@ -865,7 +865,12 @@ impl Parser {
         let loc = self.loc;
         self.eat("case")?;
         self.trim();
-        let target = self.parse_expr()?;
+        let lambda_case = self.input().starts_with('{');
+        let target = if lambda_case {
+            None
+        } else {
+            Some(self.parse_expr()?)
+        };
         self.trim();
         self.eat("{")?;
         self.trim();
@@ -882,11 +887,17 @@ impl Parser {
         }
         self.eat("}")?;
         self.trim();
-        Ok(Expr::Case {
-            loc: (loc, self.loc),
-            target: Box::new(target),
-            branches,
-        })
+        match target {
+            Some(target) => Ok(Expr::Case {
+                loc: (loc, self.loc),
+                target: Box::new(target),
+                branches,
+            }),
+            None => Ok(Expr::LambdaCase {
+                loc: (loc, self.loc),
+                branches,
+            }),
+        }
     }
 
     fn parse_match_branch(&mut self) -> Result<CaseBranch, Error> {
