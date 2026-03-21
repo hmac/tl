@@ -56,6 +56,18 @@ impl Compiler {
                 let ins = self.compile_expr(path, name, body, locals, true)?;
                 (ins, args.iter().map(|(_, n)| n.to_string()).collect())
             }
+            Expr::LambdaCase { loc, branches } => {
+                // Treat as a single-arg function whose body is a case expression.
+                let arg_name = self.generate_fresh_name();
+                let case_body = Expr::Case {
+                    loc: *loc,
+                    target: Box::new(Expr::Var(*loc, Var::Local(arg_name.clone()))),
+                    branches: branches.clone(),
+                };
+                let locals = vec![arg_name.clone()];
+                let ins = self.compile_expr(path, name, &case_body, locals, true)?;
+                (ins, vec![arg_name])
+            }
             e => (self.compile_expr(path, name, e, Vec::new(), true)?, vec![]),
         };
         let id = self.program.add_block(name, ins);
@@ -255,6 +267,24 @@ impl Compiler {
                 for mut seq in branch_instruction_sequences {
                     ins.append(&mut seq);
                 }
+            }
+            Expr::LambdaCase { loc, branches, .. } => {
+                // Compile as a Func wrapping a Case.
+                // The generated arg name is a compiler-internal detail.
+                let arg_name = self.generate_fresh_name();
+                let synthetic_args = vec![(*loc, arg_name.clone())];
+                let synthetic_body = Expr::Case {
+                    loc: *loc,
+                    target: Box::new(Expr::Var(*loc, Var::Local(arg_name))),
+                    branches: branches.clone(),
+                };
+                let name = self.lift_func(path, &locals, &synthetic_args, &synthetic_body)?;
+                for (i, _) in locals.iter().enumerate() {
+                    ins.push(Instruction::PushVar(i));
+                }
+                ins.push(Instruction::PushInt(locals.len() as i64));
+                ins.push(Instruction::PushGlobal(name));
+                ins.push(Instruction::Call);
             }
             Expr::Func { args, body, .. } => {
                 // Lift the function, then apply any captured variables

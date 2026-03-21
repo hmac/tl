@@ -613,6 +613,37 @@ impl Typechecker {
 
                 Ok(())
             }
+            Expr::LambdaCase {
+                branches, loc, ..
+            } => {
+                // LambdaCase has type A -> B. Peel one arg from expected_type.
+                match expected_type {
+                    Type::Func(target_type, result_type) => {
+                        if branches.is_empty() {
+                            return Err(Error::EmptyMatch(*loc));
+                        }
+
+                        self.check_case_is_exhaustive(
+                            *loc,
+                            branches.iter().map(|b| &b.pattern),
+                            target_type,
+                        )?;
+
+                        self.check_match_expr(
+                            local_variables,
+                            type_variables,
+                            path,
+                            branches,
+                            target_type,
+                            result_type,
+                        )
+                    }
+                    _ => Err(Error::ExpectedFunctionType {
+                        loc: *loc,
+                        actual_type: expected_type.clone(),
+                    }),
+                }
+            }
             Expr::Func {
                 args, body, loc, ..
             } => {
@@ -989,7 +1020,9 @@ impl Typechecker {
 
                 Ok(result_type)
             }
-            Expr::Func { loc, .. } => Err(Error::CannotInferTypeOfFunctions(*loc)),
+            Expr::Func { loc, .. } | Expr::LambdaCase { loc, .. } => {
+                Err(Error::CannotInferTypeOfFunctions(*loc))
+            }
             Expr::App {
                 head, args, loc, ..
             } => {

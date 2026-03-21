@@ -473,6 +473,11 @@ pub enum Expr {
         target: Box<Expr>,
         branches: Vec<CaseBranch>,
     },
+    /// A case expression with no target, acting as a function: `case { P -> E, ... }`
+    LambdaCase {
+        loc: Loc,
+        branches: Vec<CaseBranch>,
+    },
     Func {
         loc: Loc,
         args: Vec<(Loc, String)>,
@@ -508,7 +513,7 @@ impl Expr {
                 }
                 vars
             }
-            Expr::Case { branches, .. } => {
+            Expr::Case { branches, .. } | Expr::LambdaCase { branches, .. } => {
                 let mut vars = HashSet::new();
                 for b in branches {
                     for v in b.rhs.free_variables().difference(&b.pattern.vars()) {
@@ -571,6 +576,7 @@ impl HasLoc for Expr {
             Self::Tuple { loc, .. }
             | Self::List { loc, .. }
             | Self::Case { loc, .. }
+            | Self::LambdaCase { loc, .. }
             | Self::Func { loc, .. }
             | Self::App { loc, .. }
             | Self::Let { loc, .. } => *loc,
